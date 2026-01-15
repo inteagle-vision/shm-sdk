@@ -11,7 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-public class InteagleClient {
+public class InteagleClient implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(InteagleClient.class);
 
@@ -54,10 +54,17 @@ public class InteagleClient {
     }
 
     /**
-     * Close all connections.
+     * Close all connections and release resources.
+     * This method closes both REST client and MQTT subscriber resources.
      */
+    @Override
     public void close() throws Exception {
-        mqttSubscriber.disconnect();
+        if (mqttSubscriber != null) {
+            mqttSubscriber.close();
+        }
+        if (restClient != null) {
+            restClient.close();
+        }
     }
 
     public static Builder builder() {
@@ -77,6 +84,9 @@ public class InteagleClient {
          * Set API endpoint (must be HTTPS).
          */
         public Builder apiEndpoint(String endpoint) {
+            if (endpoint == null || endpoint.isEmpty()) {
+                throw new IllegalArgumentException("API endpoint cannot be null or empty");
+            }
             if (!endpoint.startsWith("https://")) {
                 throw new IllegalArgumentException("API endpoint must use HTTPS");
             }
@@ -97,6 +107,12 @@ public class InteagleClient {
          * @param port MQTT broker port
          */
         public Builder mqttEndpoint(String host, int port) {
+            if (host == null || host.isEmpty()) {
+                throw new IllegalArgumentException("MQTT host cannot be null or empty");
+            }
+            if (port <= 0 || port > 65535) {
+                throw new IllegalArgumentException("MQTT port must be between 1 and 65535");
+            }
             this.mqttHost = host;
             this.mqttPort = port;
             // 根据端口自动判断 TLS
@@ -122,6 +138,12 @@ public class InteagleClient {
          * @param accessKeySecret The Access Key Secret (sk_xxx format)
          */
         public Builder credentials(String accessKeyId, String accessKeySecret) {
+            if (accessKeyId == null || accessKeyId.isEmpty()) {
+                throw new IllegalArgumentException("accessKeyId cannot be null or empty");
+            }
+            if (accessKeySecret == null || accessKeySecret.isEmpty()) {
+                throw new IllegalArgumentException("accessKeySecret cannot be null or empty");
+            }
             this.accessKeyId = accessKeyId;
             this.accessKeySecret = accessKeySecret;
             return this;

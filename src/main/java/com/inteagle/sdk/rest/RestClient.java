@@ -28,12 +28,28 @@ import java.util.concurrent.TimeUnit;
  * REST API client for fast data queries.
  *
  * <p>Provides methods to query projects, devices, telemetry, and alarms.
+ * <p>This class implements AutoCloseable to properly release HTTP client resources.
  */
-public class RestClient {
+public class RestClient implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(RestClient.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+    
+    // HTTP timeout constants (in seconds)
+    private static final int CONNECT_TIMEOUT = 30;
+    private static final int READ_TIMEOUT = 30;
+    private static final int WRITE_TIMEOUT = 30;
+    
+    // Authentication header names
+    private static final String HEADER_ACCESS_KEY = "X-Access-Key";
+    private static final String HEADER_TIMESTAMP = "X-Timestamp";
+    private static final String HEADER_NONCE = "X-Nonce";
+    private static final String HEADER_SIGNATURE = "X-Signature";
+    private static final String HEADER_CONTENT_TYPE = "Content-Type";
+    
+    // HMAC algorithm
+    private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     private final String baseUrl;
     private final String customerId;
@@ -41,13 +57,23 @@ public class RestClient {
     private final OkHttpClient httpClient;
 
     public RestClient(String baseUrl, String customerId, String secretKey) {
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            throw new IllegalArgumentException("baseUrl cannot be null or empty");
+        }
+        if (customerId == null || customerId.isEmpty()) {
+            throw new IllegalArgumentException("customerId cannot be null or empty");
+        }
+        if (secretKey == null || secretKey.isEmpty()) {
+            throw new IllegalArgumentException("secretKey cannot be null or empty");
+        }
+        
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.customerId = customerId;
         this.secretKey = secretKey;
         this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
+                .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
+                .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
+                .writeTimeout(WRITE_TIMEOUT, TimeUnit.SECONDS)
                 .build();
     }
 
@@ -239,7 +265,7 @@ public class RestClient {
     private JsonNode post(String url, String body) throws ApiException {
         Request.Builder builder = new Request.Builder()
                 .url(url)
-                .header("Content-Type", "application/json")
+                .header(HEADER_CONTENT_TYPE, "application/json")
                 .post(RequestBody.create(body, JSON));
         addSignatureHeaders(builder, "POST", url);
         return execute(builder.build());
@@ -259,10 +285,10 @@ public class RestClient {
             String signString = timestamp + ":" + nonce + ":" + method + ":" + path;
             String signature = hmacSha256(secretKey, signString);
 
-            builder.header("X-Access-Key", customerId)
-                    .header("X-Timestamp", String.valueOf(timestamp))
-                    .header("X-Nonce", nonce)
-                    .header("X-Signature", signature);
+            builder.header(HEADER_ACCESS_KEY, customerId)
+                    .header(HEADER_TIMESTAMP, String.valueOf(timestamp))
+                    .header(HEADER_NONCE, nonce)
+                    .header(HEADER_SIGNATURE, signature);
         } catch (Exception e) {
             throw new RuntimeException("Failed to generate signature", e);
         }
@@ -273,9 +299,9 @@ public class RestClient {
      */
     private String hmacSha256(String secret, String data) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
+            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
             SecretKeySpec keySpec = new SecretKeySpec(
-                    secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+                    secret.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM);
             mac.init(keySpec);
             byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash);
@@ -289,8 +315,21 @@ public class RestClient {
             String body = response.body() != null ? response.body().string() : "";
 
             if (!response.isSuccessful()) {
-                log.error("API error: {} {} - {}", response.code(), response.message(), body);
-                throw new ApiException(response.code(), "API error: " + response.message());
+                String errorMsg = String.format("API request failed: %s %s - HTTP %d: %s",
+                        request.method(), request.url().encodedPath(), response.code(), response.message());
+                if (!body.isEmpty()) {
+                    try {
+                        JsonNode errorJson = MAPPER.readTree(body);
+                        if (errorJson.has("message")) {
+                            errorMsg += " - " + errorJson.get("message").asText();
+                        }
+                    } catch (Exception e) {
+                        // If body is not JSON, include it as-is
+                        errorMsg += " - " + body.substring(0, Math.min(body.length(), 200));
+                    }
+                }
+                log.error(errorMsg);
+                throw new ApiException(response.code(), errorMsg);
             }
 
             if (body.isEmpty()) {
@@ -299,7 +338,7 @@ public class RestClient {
             return MAPPER.readTree(body);
 
         } catch (IOException e) {
-            log.error("HTTP request failed: {}", e.getMessage());
+            log.error("HTTP request failed for {}: {}", request.url(), e.getMessage());
             throw new ApiException(0, "HTTP request failed: " + e.getMessage(), e);
         }
     }
@@ -310,5 +349,16 @@ public class RestClient {
 
     private <T> List<T> parseList(JsonNode node, Class<T> clazz) {
         return MAPPER.convertValue(node, MAPPER.getTypeFactory().constructCollectionType(List.class, clazz));
+    }
+
+    /**
+     * Close the HTTP client and release resources.
+     */
+    @Override
+    public void close() {
+        if (httpClient != null) {
+            httpClient.dispatcher().executorService().shutdown();
+            httpClient.connectionPool().evictAll();
+        }
     }
 }
