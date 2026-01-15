@@ -96,9 +96,11 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Connect to MQTT broker (blocking).
-     * Uses HMAC-SHA256 signature authentication (SK is never transmitted in plaintext).
-     * Password format: {timestamp}:{signature}
-     * Signature: HMAC-SHA256(accessKeySecret, timestamp:clientId)
+     * <p>Uses HMAC-SHA256 signature authentication (SK is never transmitted in plaintext).
+     * <p>Password format: {timestamp}:{signature}
+     * <p>Signature: HMAC-SHA256(accessKeySecret, timestamp:clientId)
+     * 
+     * @throws MqttException if connection fails
      */
     public void connect() throws MqttException {
         String protocol = useTls ? "ssl" : "tcp";
@@ -148,6 +150,9 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Connect to MQTT broker (async).
+     * <p>Returns a CompletableFuture that completes when connection is established.
+     * 
+     * @return CompletableFuture that completes when connected
      */
     public CompletableFuture<Void> connectAsync() {
         return CompletableFuture.runAsync(() -> {
@@ -184,6 +189,10 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Disconnect from MQTT broker.
+     * <p>This only disconnects the MQTT client but does not shut down the executor service.
+     * <p>Use {@link #close()} to release all resources.
+     * 
+     * @throws MqttException if disconnection fails
      */
     public void disconnect() throws MqttException {
         if (mqttClient != null && mqttClient.isConnected()) {
@@ -211,7 +220,9 @@ public class MqttSubscriber implements AutoCloseable {
     }
 
     /**
-     * Check if connected.
+     * Check if connected to MQTT broker.
+     * 
+     * @return true if currently connected, false otherwise
      */
     public boolean isConnected() {
         return mqttClient != null && mqttClient.isConnected();
@@ -236,6 +247,12 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Subscribe to all data for a project.
+     * <p>Topic pattern: inteagle/{customerId}/p/{projectId}/#
+     * 
+     * @param projectId the unique identifier of the project
+     * @param handler callback function to handle received messages
+     * @throws MqttException if subscription fails
+     * @throws IllegalArgumentException if projectId or handler is null/empty
      */
     public void subscribeProject(String projectId, Consumer<BridgeMessage> handler) throws MqttException {
         if (projectId == null || projectId.isEmpty()) {
@@ -250,6 +267,13 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Subscribe to a monitoring point.
+     * <p>Topic pattern: inteagle/{customerId}/p/{projectId}/mp/{pointId}
+     * 
+     * @param projectId the unique identifier of the project
+     * @param pointId the unique identifier of the monitoring point
+     * @param handler callback function to handle received messages
+     * @throws MqttException if subscription fails
+     * @throws IllegalArgumentException if any parameter is null/empty
      */
     public void subscribePoint(String projectId, String pointId, Consumer<BridgeMessage> handler) throws MqttException {
         if (projectId == null || projectId.isEmpty()) {
@@ -267,6 +291,13 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Subscribe to a device.
+     * <p>Topic pattern: inteagle/{customerId}/p/{projectId}/d/{deviceId}
+     * 
+     * @param projectId the unique identifier of the project
+     * @param deviceId the unique identifier of the device
+     * @param handler callback function to handle received messages
+     * @throws MqttException if subscription fails
+     * @throws IllegalArgumentException if any parameter is null/empty
      */
     public void subscribeDevice(String projectId, String deviceId, Consumer<BridgeMessage> handler) throws MqttException {
         if (projectId == null || projectId.isEmpty()) {
@@ -284,6 +315,12 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Subscribe to a custom topic pattern.
+     * <p>Supports MQTT wildcards: # (multi-level) and + (single-level)
+     * 
+     * @param topicPattern the MQTT topic pattern to subscribe to
+     * @param handler callback function to handle received messages
+     * @throws MqttException if subscription fails or client is not connected
+     * @throws IllegalArgumentException if topicPattern or handler is null/empty
      */
     public void subscribe(String topicPattern, Consumer<BridgeMessage> handler) throws MqttException {
         if (topicPattern == null || topicPattern.isEmpty()) {
@@ -303,6 +340,10 @@ public class MqttSubscriber implements AutoCloseable {
 
     /**
      * Unsubscribe from a topic.
+     * <p>Removes the subscription and stops receiving messages for the topic pattern.
+     * 
+     * @param topicPattern the MQTT topic pattern to unsubscribe from
+     * @throws MqttException if unsubscription fails
      */
     public void unsubscribe(String topicPattern) throws MqttException {
         if (mqttClient != null && mqttClient.isConnected()) {

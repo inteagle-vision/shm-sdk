@@ -79,10 +79,12 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get credential info by access key ID.
-     * Used to retrieve customerId and other metadata.
+     * <p>Used to retrieve customerId and other metadata associated with an access key.
+     * <p>This is typically called automatically during client initialization.
      *
-     * @param accessKeyId The access key ID (ak_xxx)
-     * @return Credential info including customerId
+     * @param accessKeyId The access key ID (typically starts with ak_)
+     * @return Credential info including customerId, scope, and connection details
+     * @throws ApiException if the credential is not found or API request fails
      */
     public CredentialInfo getCredentialInfo(String accessKeyId) throws ApiException {
         String url = baseUrl + "/r/BridgeCredential__getByAccessKeyId?accessKeyId=" + accessKeyId;
@@ -95,7 +97,10 @@ public class RestClient implements AutoCloseable {
     }
 
     /**
-     * Get all projects for the customer.
+     * Get all projects accessible by the authenticated customer.
+     * 
+     * @return list of projects
+     * @throws ApiException if the API request fails
      */
     public List<Project> getProjects() throws ApiException {
         String url = baseUrl + "/api/v1/projects";
@@ -105,6 +110,10 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get a specific project by ID.
+     * 
+     * @param projectId the unique identifier of the project
+     * @return project details
+     * @throws ApiException if the project is not found or API request fails
      */
     public Project getProject(String projectId) throws ApiException {
         String url = baseUrl + "/api/v1/projects/" + projectId;
@@ -114,6 +123,10 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get all devices in a project.
+     * 
+     * @param projectId the unique identifier of the project
+     * @return list of devices in the project
+     * @throws ApiException if the API request fails
      */
     public List<Device> getDevices(String projectId) throws ApiException {
         String url = baseUrl + "/api/v1/projects/" + projectId + "/devices";
@@ -123,6 +136,10 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get a specific device by ID.
+     * 
+     * @param deviceId the unique identifier of the device
+     * @return device details
+     * @throws ApiException if the device is not found or API request fails
      */
     public Device getDevice(String deviceId) throws ApiException {
         String url = baseUrl + "/api/v1/devices/" + deviceId;
@@ -132,6 +149,10 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get monitoring points in a project.
+     * 
+     * @param projectId the unique identifier of the project
+     * @return list of monitoring points in the project
+     * @throws ApiException if the API request fails
      */
     public List<MonitoringPoint> getMonitoringPoints(String projectId) throws ApiException {
         String url = baseUrl + "/api/v1/projects/" + projectId + "/points";
@@ -162,6 +183,12 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get latest telemetry for a single device (convenience method).
+     * <p>This is a convenience wrapper around {@link #getLatestTelemetry(String, List, List)}
+     * for querying a single device.
+     * 
+     * @param deviceId the unique identifier of the device
+     * @return map of metric names to their latest values, or empty map if no data found
+     * @throws ApiException if the API request fails
      */
     public Map<String, Object> getLatestTelemetry(String deviceId) throws ApiException {
         List<Map<String, Object>> results = getLatestTelemetry("DEVICE", List.of(deviceId), null);
@@ -231,6 +258,11 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Get active alarms for a project (convenience method).
+     * <p>This is equivalent to calling {@link #getAlarms(String, String)} with searchStatus="ACTIVE".
+     * 
+     * @param projectId the unique identifier of the project
+     * @return list of active alarms
+     * @throws ApiException if the API request fails
      */
     public List<Alarm> getActiveAlarms(String projectId) throws ApiException {
         return getAlarms(projectId, "ACTIVE");
@@ -238,6 +270,10 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Acknowledge an alarm.
+     * <p>Marks the alarm as acknowledged, indicating that someone has reviewed it.
+     * 
+     * @param alarmId the unique identifier of the alarm
+     * @throws ApiException if the API request fails
      */
     public void acknowledgeAlarm(String alarmId) throws ApiException {
         String url = baseUrl + "/api/v1/alarms/" + alarmId + "/ack";
@@ -246,6 +282,10 @@ public class RestClient implements AutoCloseable {
 
     /**
      * Clear an alarm.
+     * <p>Marks the alarm as cleared, indicating the issue has been resolved.
+     * 
+     * @param alarmId the unique identifier of the alarm
+     * @throws ApiException if the API request fails
      */
     public void clearAlarm(String alarmId) throws ApiException {
         String url = baseUrl + "/api/v1/alarms/" + alarmId + "/clear";

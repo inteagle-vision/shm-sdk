@@ -33,7 +33,9 @@ public class InteagleClient implements AutoCloseable {
     }
 
     /**
-     * Get the customer ID.
+     * Get the customer ID associated with this client.
+     * 
+     * @return the customer ID used for MQTT topics and API requests
      */
     public String getCustomerId() {
         return customerId;
@@ -41,6 +43,9 @@ public class InteagleClient implements AutoCloseable {
 
     /**
      * Get REST API client for fast queries.
+     * <p>Use this client to query projects, devices, telemetry data, and alarms.
+     * 
+     * @return the REST client instance
      */
     public RestClient rest() {
         return restClient;
@@ -48,6 +53,9 @@ public class InteagleClient implements AutoCloseable {
 
     /**
      * Get MQTT subscriber for real-time data.
+     * <p>Use this subscriber to connect and subscribe to real-time data streams.
+     * 
+     * @return the MQTT subscriber instance
      */
     public MqttSubscriber mqtt() {
         return mqttSubscriber;
@@ -55,7 +63,10 @@ public class InteagleClient implements AutoCloseable {
 
     /**
      * Close all connections and release resources.
-     * This method closes both REST client and MQTT subscriber resources.
+     * <p>This method closes both REST client and MQTT subscriber resources.
+     * <p>After calling this method, the client should not be used again.
+     * 
+     * @throws Exception if an error occurs while closing resources
      */
     @Override
     public void close() throws Exception {
@@ -67,6 +78,11 @@ public class InteagleClient implements AutoCloseable {
         }
     }
 
+    /**
+     * Create a new builder instance for constructing an InteagleClient.
+     * 
+     * @return a new builder instance
+     */
     public static Builder builder() {
         return new Builder();
     }
@@ -81,7 +97,11 @@ public class InteagleClient implements AutoCloseable {
         private boolean mqttUseTls = true;  // MQTT TLS 可选
 
         /**
-         * Set API endpoint (must be HTTPS).
+         * Set API endpoint (must be HTTPS for security).
+         * 
+         * @param endpoint the HTTPS API endpoint URL
+         * @return this builder instance
+         * @throws IllegalArgumentException if endpoint is null, empty, or not HTTPS
          */
         public Builder apiEndpoint(String endpoint) {
             if (endpoint == null || endpoint.isEmpty()) {
@@ -122,9 +142,11 @@ public class InteagleClient implements AutoCloseable {
 
         /**
          * Explicitly set whether to use TLS for MQTT connection.
-         * This overrides the automatic port-based detection.
+         * <p>This overrides the automatic port-based detection.
+         * <p>Use TLS (true) for production environments to ensure secure communication.
          *
          * @param useTls true to use TLS (ssl://), false for plain TCP (tcp://)
+         * @return this builder instance
          */
         public Builder mqttUseTls(boolean useTls) {
             this.mqttUseTls = useTls;
@@ -132,10 +154,14 @@ public class InteagleClient implements AutoCloseable {
         }
 
         /**
-         * Set AK/AS credentials for authentication.
-         * The customerId will be fetched automatically from API if not provided.
-         * @param accessKeyId The Access Key ID (ak_xxx format)
-         * @param accessKeySecret The Access Key Secret (sk_xxx format)
+         * Set AK/SK credentials for authentication.
+         * <p>The customerId will be fetched automatically from API if not provided via {@link #customerId(String)}.
+         * <p>These credentials should be securely stored and never hardcoded in production.
+         * 
+         * @param accessKeyId The Access Key ID (typically starts with ak_)
+         * @param accessKeySecret The Access Key Secret (typically starts with sk_)
+         * @return this builder instance
+         * @throws IllegalArgumentException if accessKeyId or accessKeySecret is null or empty
          */
         public Builder credentials(String accessKeyId, String accessKeySecret) {
             if (accessKeyId == null || accessKeyId.isEmpty()) {
@@ -151,14 +177,25 @@ public class InteagleClient implements AutoCloseable {
 
         /**
          * Optionally set the customerId explicitly.
-         * If not set, it will be fetched from API using the credentials.
+         * <p>If not set, it will be fetched automatically from API using the credentials.
+         * <p>Setting this explicitly can avoid an extra API call during client initialization.
+         * 
          * @param customerId The customer ID
+         * @return this builder instance
          */
         public Builder customerId(String customerId) {
             this.customerId = customerId;
             return this;
         }
 
+        /**
+         * Build the InteagleClient instance with configured settings.
+         * <p>This method validates that required credentials are provided and optionally
+         * fetches the customerId from the API if not explicitly set.
+         * 
+         * @return a configured InteagleClient instance
+         * @throws IllegalArgumentException if required fields are missing
+         */
         public InteagleClient build() {
             if (accessKeyId == null || accessKeySecret == null) {
                 throw new IllegalArgumentException("accessKeyId and accessKeySecret are required");
