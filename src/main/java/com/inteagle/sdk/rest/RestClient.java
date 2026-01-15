@@ -50,6 +50,9 @@ public class RestClient implements AutoCloseable {
     
     // HMAC algorithm
     private static final String HMAC_ALGORITHM = "HmacSHA256";
+    
+    // Error message truncation length
+    private static final int ERROR_MESSAGE_MAX_LENGTH = 200;
 
     private final String baseUrl;
     private final String customerId;
@@ -365,7 +368,7 @@ public class RestClient implements AutoCloseable {
                         }
                     } catch (Exception e) {
                         // If body is not JSON, include it as-is
-                        errorMsg += " - " + body.substring(0, Math.min(body.length(), 200));
+                        errorMsg += " - " + body.substring(0, Math.min(body.length(), ERROR_MESSAGE_MAX_LENGTH));
                     }
                 }
                 log.error(errorMsg);

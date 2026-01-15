@@ -23,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -210,7 +211,7 @@ public class MqttSubscriber implements AutoCloseable {
         disconnect();
         asyncExecutor.shutdown();
         try {
-            if (!asyncExecutor.awaitTermination(EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
+            if (!asyncExecutor.awaitTermination(EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 asyncExecutor.shutdownNow();
             }
         } catch (InterruptedException e) {
