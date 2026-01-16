@@ -1,4 +1,4 @@
-# Inteagle Cloud SDK (结构健康监测 SDK)
+# 结构健康监测平台 Java SDK
 
 用于 Inteagle 结构健康监测 (SHM) 云平台的 Java SDK。
 
@@ -30,7 +30,7 @@
 <dependency>
     <groupId>com.github.inteagle-vision</groupId>
     <artifactId>shm-sdk</artifactId>
-    <version>v0.1.0-alpha</version>
+    <version>v0.1.1</version>
 </dependency>
 ```
 
@@ -42,7 +42,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.inteagle-vision:shm-sdk:v0.1.0-alpha'
+    implementation 'com.github.inteagle-vision:shm-sdk:v0.1.1'
 }
 ```
 

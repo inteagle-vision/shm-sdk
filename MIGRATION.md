@@ -1,6 +1,6 @@
 # Migration Guide
 
-## Upgrading from v0.1.0 to v0.1.1 (Unreleased)
+## Upgrading from v0.1.0 to v0.1.1
 
 ### Resource Management - IMPORTANT
 
