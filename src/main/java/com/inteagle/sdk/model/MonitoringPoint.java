@@ -14,4 +14,13 @@ public class MonitoringPoint {
     public void setName(String name) { this.name = name; }
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
+
+    @Override
+    public String toString() {
+        return "MonitoringPoint{" +
+                "id='" + id + '\'' +
+                ", name='" + name + '\'' +
+                ", projectId='" + projectId + '\'' +
+                '}';
+    }
 }

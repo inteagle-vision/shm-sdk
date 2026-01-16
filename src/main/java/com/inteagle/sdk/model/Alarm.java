@@ -20,4 +20,15 @@ public class Alarm {
     public void setStatus(String status) { this.status = status; }
     public long getCreatedTime() { return createdTime; }
     public void setCreatedTime(long createdTime) { this.createdTime = createdTime; }
+
+    @Override
+    public String toString() {
+        return "Alarm{" +
+                "id='" + id + '\'' +
+                ", type='" + type + '\'' +
+                ", severity='" + severity + '\'' +
+                ", status='" + status + '\'' +
+                ", createdTime=" + createdTime +
+                '}';
+    }
 }

@@ -48,7 +48,32 @@ dependencies {
 
 ## 快速开始
 
-### 使用访问令牌（推荐）
+### 资源管理（重要）
+
+SDK 实现了 `AutoCloseable` 接口，建议使用 try-with-resources 确保资源正确释放：
+
+```java
+try (InteagleClient client = InteagleClient.builder()
+        .apiEndpoint("https://api.shm.inteagle.com")
+        .mqttEndpoint("broker.shm.inteagle.com", 8883)
+        .credentials(customerId, accessToken)
+        .useTls(true)
+        .build()) {
+    
+    // REST API - 查询数据
+    List<Device> devices = client.rest().getDevices("project-id");
+    
+    // MQTT - 实时订阅
+    client.mqtt().connect();
+    client.mqtt().subscribeProject("project-id", message -> {
+        System.out.println("类型: " + message.getType());
+        System.out.println("数据: " + message.getPayload());
+    });
+    
+} // 资源自动清理
+```
+
+### 使用访问令牌（传统方式）
 
 ```java
 import com.inteagle.sdk.InteagleClient;
@@ -164,3 +189,5 @@ Apache License 2.0
 
 - 文档: https://docs.inteagle.com
 - 问题反馈: https://github.com/inteagle-vision/shm-sdk/issues
+- 更新日志: [CHANGELOG.md](CHANGELOG.md)
+- 迁移指南: [MIGRATION.md](MIGRATION.md)

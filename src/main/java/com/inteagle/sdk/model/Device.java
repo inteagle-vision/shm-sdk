@@ -17,4 +17,14 @@ public class Device {
     public void setType(String type) { this.type = type; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
+
+    @Override
+    public String toString() {
+        return "Device{" +
+                "id='" + id + '\'' +
+                ", name='" + name + '\'' +
+                ", type='" + type + '\'' +
+                ", active=" + active +
+                '}';
+    }
 }
