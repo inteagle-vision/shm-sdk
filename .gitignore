@@ -44,5 +44,4 @@ surefire-reports/
 credentials.properties
 secrets.properties
 
-# Build artifacts (bin/*.jar is generated)
-bin/*.jar
+
