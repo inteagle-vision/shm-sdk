@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.inteagle.sdk.InteagleClient;
 import com.inteagle.sdk.exception.SdkException;
 import com.inteagle.sdk.model.*;
+import com.inteagle.sdk.model.attr.AttrTypes;
+import com.inteagle.sdk.model.attr.Target;
 import com.inteagle.sdk.query.*;
 import picocli.CommandLine;
 import picocli.CommandLine.*;
@@ -337,8 +339,34 @@ public class SdkCli implements Runnable {
                 if (includeAttrs && device.getAttributes() != null && !device.getAttributes().isEmpty()) {
                     System.out.println();
                     System.out.println("  " + parent.bold("属性 (" + device.getAttributes().size() + " 个):"));
+
+                    // 使用类型安全 API 显示 targets
+                    List<Target> targets = device.getAttribute("targets", AttrTypes.TARGET_LIST);
+                    if (targets != null && !targets.isEmpty()) {
+                        System.out.println("    " + parent.cyan("targets") + ": " + targets.size() + " 个目标点");
+                        for (Target t : targets) {
+                            String basePointStr = Boolean.TRUE.equals(t.getBasePoint()) ? parent.green("基准点") : "";
+                            System.out.println("      " + parent.bold(t.getTargetId())
+                                + " [" + t.getTargetModel() + "] " + basePointStr);
+                            if (verbose && t.getRoi() != null) {
+                                System.out.println("        ROI: " + parent.dim(
+                                    "x=" + t.getRoi().getX() + ", y=" + t.getRoi().getY()
+                                    + ", " + t.getRoi().getWidth() + "x" + t.getRoi().getHeight()));
+                            }
+                            if (verbose && t.getRefPoint() != null) {
+                                System.out.println("        RefPoint: " + parent.dim(
+                                    "x=" + String.format("%.2f", t.getRefPoint().getX())
+                                    + ", y=" + String.format("%.2f", t.getRefPoint().getY())
+                                    + ", r=" + String.format("%.2f", t.getRefPoint().getR())));
+                            }
+                        }
+                    }
+
+                    // 其他属性
                     for (Map.Entry<String, Object> entry : device.getAttributes().entrySet()) {
-                        printAttribute(entry.getKey(), entry.getValue(), verbose);
+                        if (!"targets".equals(entry.getKey())) {
+                            printAttribute(entry.getKey(), entry.getValue(), verbose);
+                        }
                     }
                 }
 
