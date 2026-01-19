@@ -3,6 +3,8 @@ package com.inteagle.sdk.integration;
 import com.inteagle.sdk.InteagleClient;
 import com.inteagle.sdk.model.Device;
 import com.inteagle.sdk.model.PageResult;
+import com.inteagle.sdk.model.attr.AttrTypes;
+import com.inteagle.sdk.model.attr.Target;
 import com.inteagle.sdk.query.DeviceQuery;
 import java.time.Duration;
 import java.util.List;
@@ -50,31 +52,21 @@ public class DeviceApiQuickTest {
                     System.out.println("    AlarmRules: " + d.getAlarmRules().size());
                 }
 
-                // 显示 attributes
-                Map<String, Object> attrs = d.getAttributes();
-                if (attrs != null && !attrs.isEmpty()) {
-                    System.out.println("    Attributes: " + attrs.size() + " 个");
-                    for (Map.Entry<String, Object> entry : attrs.entrySet()) {
-                        String key = entry.getKey();
-                        Object value = entry.getValue();
-                        if ("targets".equals(key) && value instanceof List) {
-                            // 特别处理 targets
-                            List<?> targets = (List<?>) value;
-                            System.out.println("      - targets: " + targets.size() + " 个目标点");
-                            for (int i = 0; i < targets.size(); i++) {
-                                Object t = targets.get(i);
-                                if (t instanceof Map) {
-                                    Map<?, ?> tm = (Map<?, ?>) t;
-                                    System.out.println("        [" + i + "] targetId=" + tm.get("targetId")
-                                        + ", model=" + tm.get("targetModel")
-                                        + ", basePoint=" + tm.get("basePoint"));
-                                }
-                            }
-                        } else {
-                            String valueStr = String.valueOf(value);
-                            if (valueStr.length() > 50) valueStr = valueStr.substring(0, 50) + "...";
-                            System.out.println("      - " + key + ": " + valueStr);
-                        }
+                // 显示 attributes - 使用新的类型安全 API
+                if (d.hasAttribute("active")) {
+                    Boolean active = d.getBoolAttr("active");
+                    System.out.println("    active: " + active);
+                }
+
+                // 使用强类型获取 targets
+                List<Target> targets = d.getAttribute("targets", AttrTypes.TARGET_LIST);
+                if (targets != null && !targets.isEmpty()) {
+                    System.out.println("    targets: " + targets.size() + " 个目标点");
+                    for (Target t : targets) {
+                        System.out.println("      - " + t.getTargetId()
+                            + " [" + t.getTargetModel() + "]"
+                            + " basePoint=" + t.getBasePoint()
+                            + " roi=" + t.getRoi());
                     }
                 }
             }

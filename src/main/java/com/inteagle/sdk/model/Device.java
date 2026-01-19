@@ -4,6 +4,9 @@
 package com.inteagle.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.inteagle.sdk.model.attr.AttributeHelper;
+
 import java.util.List;
 import java.util.Map;
 
@@ -168,6 +171,74 @@ public final class Device {
 
     public void setAttributes(Map<String, Object> attributes) {
         this.attributes = attributes;
+    }
+
+    // ==================== 类型安全的属性访问方法 ====================
+
+    /**
+     * 获取指定类型的属性值
+     * <p>
+     * 使用示例:
+     * <pre>
+     * Boolean active = device.getAttribute("active", Boolean.class);
+     * MyCustomAttr attr = device.getAttribute("myAttr", MyCustomAttr.class);
+     * </pre>
+     *
+     * @param key  属性键名
+     * @param type 目标类型
+     * @param <T>  返回类型
+     * @return 转换后的属性值，如果不存在或转换失败返回 null
+     */
+    public <T> T getAttribute(String key, Class<T> type) {
+        return AttributeHelper.getAttribute(attributes, key, type);
+    }
+
+    /**
+     * 获取复杂类型的属性值（如 List、泛型等）
+     * <p>
+     * 使用示例:
+     * <pre>
+     * List&lt;Target&gt; targets = device.getAttribute("targets", AttrTypes.TARGET_LIST);
+     * List&lt;String&gt; tags = device.getAttribute("tags", new TypeReference&lt;List&lt;String&gt;&gt;(){});
+     * </pre>
+     *
+     * @param key     属性键名
+     * @param typeRef 类型引用
+     * @param <T>     返回类型
+     * @return 转换后的属性值，如果不存在或转换失败返回 null
+     */
+    public <T> T getAttribute(String key, TypeReference<T> typeRef) {
+        return AttributeHelper.getAttribute(attributes, key, typeRef);
+    }
+
+    /** 获取字符串属性 */
+    public String getStringAttr(String key) {
+        return AttributeHelper.getString(attributes, key);
+    }
+
+    /** 获取整数属性 */
+    public Integer getIntAttr(String key) {
+        return AttributeHelper.getInt(attributes, key);
+    }
+
+    /** 获取长整数属性 */
+    public Long getLongAttr(String key) {
+        return AttributeHelper.getLong(attributes, key);
+    }
+
+    /** 获取浮点数属性 */
+    public Double getDoubleAttr(String key) {
+        return AttributeHelper.getDouble(attributes, key);
+    }
+
+    /** 获取布尔属性 */
+    public Boolean getBoolAttr(String key) {
+        return AttributeHelper.getBool(attributes, key);
+    }
+
+    /** 检查是否存在指定属性 */
+    public boolean hasAttribute(String key) {
+        return AttributeHelper.hasAttribute(attributes, key);
     }
 
     public List<MonitoringPointRef> getMonitoringPoints() {

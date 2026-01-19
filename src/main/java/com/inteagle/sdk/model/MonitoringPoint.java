@@ -5,6 +5,8 @@ package com.inteagle.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.inteagle.sdk.model.attr.AttributeHelper;
 
 import java.util.List;
 import java.util.Map;
@@ -245,6 +247,38 @@ public final class MonitoringPoint {
      */
     public boolean hasLocation() {
         return latitude != null && longitude != null;
+    }
+
+    // ==================== 类型安全的属性访问方法 ====================
+
+    /** 获取指定类型的属性值 */
+    public <T> T getAttribute(String key, Class<T> type) {
+        return AttributeHelper.getAttribute(attributes, key, type);
+    }
+
+    /** 获取复杂类型的属性值 */
+    public <T> T getAttribute(String key, TypeReference<T> typeRef) {
+        return AttributeHelper.getAttribute(attributes, key, typeRef);
+    }
+
+    /** 获取字符串属性 */
+    public String getStringAttr(String key) {
+        return AttributeHelper.getString(attributes, key);
+    }
+
+    /** 获取整数属性 */
+    public Integer getIntAttr(String key) {
+        return AttributeHelper.getInt(attributes, key);
+    }
+
+    /** 获取布尔属性 */
+    public Boolean getBoolAttr(String key) {
+        return AttributeHelper.getBool(attributes, key);
+    }
+
+    /** 检查是否存在指定属性 */
+    public boolean hasAttribute(String key) {
+        return AttributeHelper.hasAttribute(attributes, key);
     }
 
     @Override
