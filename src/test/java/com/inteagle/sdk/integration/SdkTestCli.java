@@ -43,10 +43,125 @@ public class SdkTestCli {
     private InteagleClient client;
     private Scanner scanner;
 
+    /**
+     * 主入口 - 支持命令行参数和环境变量
+     * <p>
+     * 自动测试模式:
+     * <pre>
+     * # 通过命令行参数
+     * mvn exec:java -Dexec.mainClass="com.inteagle.sdk.integration.SdkTestCli" \
+     *     -Dexec.classpathScope=test \
+     *     -Dexec.args="--auto --endpoint=http://localhost:8095 --ak=ak_xxx --sk=sk_xxx --entity=uuid --keys=T_01.dx,T_01.dy"
+     *
+     * # 或者通过环境变量
+     * export INTEAGLE_API_ENDPOINT=http://localhost:8095
+     * export INTEAGLE_ACCESS_KEY=ak_xxx
+     * export INTEAGLE_SECRET_KEY=sk_xxx
+     * export INTEAGLE_TEST_ENTITY=uuid
+     * export INTEAGLE_TEST_KEYS=T_01.dx,T_01.dy
+     * mvn exec:java ... -Dexec.args="--auto"
+     * </pre>
+     */
     public static void main(String[] args) {
-        new SdkTestCli().run();
+        SdkTestCli cli = new SdkTestCli();
+
+        // 解析命令行参数
+        boolean autoMode = false;
+        String endpoint = System.getenv().getOrDefault("INTEAGLE_API_ENDPOINT", DEFAULT_ENDPOINT);
+        String accessKey = System.getenv("INTEAGLE_ACCESS_KEY");
+        String secretKey = System.getenv("INTEAGLE_SECRET_KEY");
+        String testEntity = System.getenv("INTEAGLE_TEST_ENTITY");
+        String testKeys = System.getenv().getOrDefault("INTEAGLE_TEST_KEYS", "temperature");
+
+        for (String arg : args) {
+            if ("--auto".equals(arg)) {
+                autoMode = true;
+            } else if (arg.startsWith("--endpoint=")) {
+                endpoint = arg.substring("--endpoint=".length());
+            } else if (arg.startsWith("--ak=")) {
+                accessKey = arg.substring("--ak=".length());
+            } else if (arg.startsWith("--sk=")) {
+                secretKey = arg.substring("--sk=".length());
+            } else if (arg.startsWith("--entity=")) {
+                testEntity = arg.substring("--entity=".length());
+            } else if (arg.startsWith("--keys=")) {
+                testKeys = arg.substring("--keys=".length());
+            }
+        }
+
+        if (autoMode) {
+            cli.runAutoTest(endpoint, accessKey, secretKey, testEntity, testKeys);
+        } else {
+            cli.run();
+        }
     }
 
+    /**
+     * 自动测试模式 - 非交互式
+     */
+    public void runAutoTest(String endpoint, String accessKey, String secretKey, String testEntity, String testKeys) {
+        printBanner();
+        println("🤖 自动测试模式\n");
+
+        if (accessKey == null || accessKey.isBlank() || secretKey == null || secretKey.isBlank()) {
+            println("❌ 请提供 AK/SK (通过 --ak=xxx --sk=xxx 或环境变量)");
+            return;
+        }
+
+        println("Endpoint: " + endpoint);
+        println("Access Key: " + accessKey);
+        println("Test Entity: " + (testEntity != null ? testEntity : "(未指定)"));
+        println("Test Keys: " + testKeys);
+
+        // 1. 创建客户端
+        println("\n🔗 连接到 " + endpoint + " ...");
+        try {
+            client = InteagleClient.builder()
+                    .endpoint(endpoint)
+                    .credentials(accessKey, secretKey)
+                    .timeout(Duration.ofSeconds(30))
+                    .build();
+            println("✅ 客户端创建成功 (协议: " + client.getProtocol() + ")");
+        } catch (Exception e) {
+            println("❌ 创建客户端失败: " + e.getMessage());
+            return;
+        }
+
+        try {
+            // 2. 测试项目列表
+            println("\n" + "=".repeat(50));
+            println("📋 测试: 查询项目列表");
+            println("=".repeat(50));
+            listProjects();
+
+            // 3. 测试设备列表
+            println("\n" + "=".repeat(50));
+            println("📱 测试: 查询设备列表");
+            println("=".repeat(50));
+            listDevicesAuto();
+
+            // 4. 测试遥测数据
+            if (testEntity != null && !testEntity.isBlank()) {
+                println("\n" + "=".repeat(50));
+                println("📊 测试: 查询遥测数据");
+                println("=".repeat(50));
+                queryTelemetryAuto(testEntity, testKeys, 24);
+            }
+
+            println("\n" + "=".repeat(50));
+            println("✅ 自动测试完成!");
+            println("=".repeat(50));
+
+        } catch (SdkException e) {
+            println("❌ 测试失败: " + e.getErrorCode() + " - " + e.getMessage());
+        } finally {
+            client.close();
+        }
+    }
+
+    /**
+     * 交互式模式
+     */
     public void run() {
         scanner = new Scanner(System.in);
 
@@ -318,6 +433,59 @@ public class SdkTestCli {
             String time = TIME_FMT.format(Instant.ofEpochMilli(a.getStartTs()));
             println(String.format("   • [%s] %s | %s | %s",
                     a.getSeverity(), a.getType(), a.getOriginatorName(), time));
+        }
+    }
+
+    // === 自动测试辅助方法 ===
+
+    private void listDevicesAuto() throws SdkException {
+        println("\n📱 设备列表:");
+        PageResult<Device> result = client.devices().list(
+                DeviceQuery.builder().pageSize(10).build()
+        );
+        println("   共 " + result.getTotal() + " 个设备\n");
+
+        if (result.isEmpty()) {
+            println("   (无数据)");
+            return;
+        }
+
+        for (Device d : result) {
+            println(String.format("   • %s", d.getName()));
+            println(String.format("     ID: %s | 类型: %s | %s",
+                    d.getDeviceId() != null ? d.getDeviceId() : "?",
+                    d.getType() != null ? d.getType() : "-",
+                    d.isOnline() ? "🟢 在线" : "⚪ 离线"));
+        }
+    }
+
+    private void queryTelemetryAuto(String entityId, String keys, int hours) throws SdkException {
+        println("\n📊 遥测数据:");
+        println("   实体: " + entityId);
+        println("   键名: " + keys);
+        println("   时间范围: 最近 " + hours + " 小时\n");
+
+        Map<String, List<TelemetryValue>> result = client.telemetry().list(
+                TelemetryQuery.builder()
+                        .entityId(entityId)
+                        .keys(keys.split(","))
+                        .lastHours(hours)
+                        .limit(10)
+                        .orderDesc(true)
+                        .build()
+        );
+
+        if (result.isEmpty()) {
+            println("   ⚠ 未查询到数据");
+            return;
+        }
+
+        for (Map.Entry<String, List<TelemetryValue>> entry : result.entrySet()) {
+            println("\n   " + entry.getKey() + " (" + entry.getValue().size() + " 条):");
+            for (TelemetryValue v : entry.getValue()) {
+                String time = TIME_FMT.format(Instant.ofEpochMilli(v.getTs()));
+                println(String.format("     %s : %s", time, v.getValue()));
+            }
         }
     }
 
