@@ -876,10 +876,21 @@ public class SdkCli implements Runnable {
             }
         }
 
-        private void getDevice(InteagleClient client, String deviceId) throws SdkException {
+        private void getDevice(InteagleClient client, String args) throws SdkException {
+            // 解析参数: device <id> [-v]
+            String[] parts = args.split("\\s+");
+            String deviceId = parts.length > 0 ? parts[0] : "";
+            boolean verbose = false;
+            for (String p : parts) {
+                if ("-v".equals(p) || "--verbose".equals(p)) {
+                    verbose = true;
+                }
+            }
+
             if (deviceId.isEmpty() || "help".equalsIgnoreCase(deviceId) || "-h".equals(deviceId)) {
-                System.out.println("  用法: " + parent.cyan("device <id>") + " - 查看设备详情");
-                System.out.println("  示例: device ddbd2770-f508-11f0-8ccb-0d404d4711dc");
+                System.out.println("  用法: " + parent.cyan("device <id> [-v]") + " - 查看设备详情");
+                System.out.println("  选项: " + parent.dim("-v  显示详细属性"));
+                System.out.println("  示例: device ddbd2770-f508-11f0-8ccb-0d404d4711dc -v");
                 return;
             }
             // 验证 UUID 格式
@@ -893,8 +904,35 @@ public class SdkCli implements Runnable {
             parent.printItem("ID", d.getDeviceId());
             parent.printItem("类型", d.getType());
             parent.printItem("状态", d.isOnline() ? parent.green("在线") : parent.dim("离线"));
-            if (d.getAttributes() != null && !d.getAttributes().isEmpty()) {
-                System.out.println("  " + parent.dim("属性: " + d.getAttributes().keySet()));
+
+            // 使用类型安全 API 显示 targets
+            List<Target> targets = d.getAttribute("targets", AttrTypes.TARGET_LIST);
+            if (targets != null && !targets.isEmpty()) {
+                System.out.println("  " + parent.cyan("targets") + ": " + targets.size() + " 个目标点");
+                for (Target t : targets) {
+                    String basePointStr = Boolean.TRUE.equals(t.getBasePoint()) ? parent.green(" 基准点") : "";
+                    System.out.println("    " + parent.bold(t.getTargetId()) + " [" + t.getTargetModel() + "]" + basePointStr);
+                    if (verbose && t.getRoi() != null) {
+                        System.out.println("      ROI: " + parent.dim(t.getRoi().getWidth() + "x" + t.getRoi().getHeight()
+                            + " @ " + t.getRoi().getX() + "," + t.getRoi().getY()));
+                    }
+                    if (verbose && t.getRefPoint() != null) {
+                        System.out.println("      RefPoint: " + parent.dim(
+                            String.format("(%.1f, %.1f) r=%.1f", t.getRefPoint().getX(), t.getRefPoint().getY(), t.getRefPoint().getR())));
+                    }
+                }
+            }
+
+            // 其他属性
+            if (d.getAttributes() != null) {
+                for (Map.Entry<String, Object> entry : d.getAttributes().entrySet()) {
+                    if (!"targets".equals(entry.getKey())) {
+                        Object v = entry.getValue();
+                        String display = String.valueOf(v);
+                        if (!verbose && display.length() > 50) display = display.substring(0, 47) + "...";
+                        System.out.println("  " + parent.cyan(entry.getKey()) + ": " + display);
+                    }
+                }
             }
         }
 
