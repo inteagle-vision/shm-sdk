@@ -36,7 +36,13 @@ test-output/
 surefire-reports/
 
 # Credentials (NEVER commit these)
+.env
 *.env
 .env.*
+!.env.example
+!*.env.example
 credentials.properties
 secrets.properties
+
+# Build artifacts (bin/*.jar is generated)
+bin/*.jar

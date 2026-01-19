@@ -233,6 +233,7 @@ public class SdkTestCli {
             println("  5. 查询告警统计");
             println("  6. 查询遥测数据");
             println("  7. 查询活跃告警");
+            println("  8. 查询设备详情 (含属性)");
             println("  0. 退出");
             println("=".repeat(50));
 
@@ -247,6 +248,7 @@ public class SdkTestCli {
                     case "5" -> showAlarmStats();
                     case "6" -> queryTelemetry();
                     case "7" -> listActiveAlarms();
+                    case "8" -> getDeviceDetail();
                     case "0" -> { return; }
                     default -> println("无效选项");
                 }
@@ -433,6 +435,70 @@ public class SdkTestCli {
             String time = TIME_FMT.format(Instant.ofEpochMilli(a.getStartTs()));
             println(String.format("   • [%s] %s | %s | %s",
                     a.getSeverity(), a.getType(), a.getOriginatorName(), time));
+        }
+    }
+
+    private void getDeviceDetail() throws SdkException {
+        println("\n💡 提示: 设备ID可以从设备列表中复制\n");
+
+        String deviceId = prompt("设备ID", null);
+        if (deviceId == null || deviceId.isBlank()) {
+            println("设备ID 不能为空");
+            return;
+        }
+
+        println("\n📱 设备详情:");
+        Device device = client.devices().get(deviceId);
+
+        println("   名称: " + device.getName());
+        println("   ID: " + device.getDeviceId());
+        println("   类型: " + (device.getType() != null ? device.getType() : "-"));
+        println("   型号: " + (device.getModel() != null ? device.getModel() : "-"));
+        println("   状态: " + (device.isOnline() ? "🟢 在线" : "⚪ 离线"));
+        println("   创建时间: " + (device.getCreatedAt() != null ? device.getCreatedAt() : "-"));
+
+        // 显示属性
+        Map<String, Object> attrs = device.getAttributes();
+        if (attrs != null && !attrs.isEmpty()) {
+            println("\n   📋 属性 (" + attrs.size() + " 个):");
+            for (Map.Entry<String, Object> entry : attrs.entrySet()) {
+                String key = entry.getKey();
+                Object value = entry.getValue();
+                String valueStr;
+                if (value instanceof List || value instanceof Map) {
+                    // JSON 数组或对象，截断显示
+                    String json = value.toString();
+                    valueStr = json.length() > 100 ? json.substring(0, 100) + "..." : json;
+                } else {
+                    valueStr = String.valueOf(value);
+                }
+                println(String.format("     • %s: %s", key, valueStr));
+            }
+
+            // 特别显示 targets 属性
+            if (attrs.containsKey("targets")) {
+                Object targets = attrs.get("targets");
+                println("\n   🎯 targets 详情:");
+                if (targets instanceof List) {
+                    List<?> targetList = (List<?>) targets;
+                    println("      共 " + targetList.size() + " 个目标点");
+                    for (int i = 0; i < targetList.size(); i++) {
+                        Object t = targetList.get(i);
+                        if (t instanceof Map) {
+                            Map<?, ?> targetMap = (Map<?, ?>) t;
+                            println(String.format("      [%d] targetId=%s, model=%s, basePoint=%s",
+                                    i,
+                                    targetMap.get("targetId"),
+                                    targetMap.get("targetModel"),
+                                    targetMap.get("basePoint")));
+                        }
+                    }
+                } else {
+                    println("      " + targets);
+                }
+            }
+        } else {
+            println("\n   (无属性数据)");
         }
     }
 

@@ -1,0 +1,43 @@
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.1.1"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.1.1 http://maven.apache.org/xsd/assembly-2.1.1.xsd">
+    <id>cli</id>
+    <formats>
+        <format>jar</format>
+    </formats>
+    <includeBaseDirectory>false</includeBaseDirectory>
+
+    <!-- Include main compiled classes -->
+    <fileSets>
+        <fileSet>
+            <directory>${project.build.outputDirectory}</directory>
+            <outputDirectory>/</outputDirectory>
+        </fileSet>
+        <!-- Include test compiled classes (for CLI) -->
+        <fileSet>
+            <directory>${project.build.testOutputDirectory}</directory>
+            <outputDirectory>/</outputDirectory>
+        </fileSet>
+    </fileSets>
+
+    <!-- Include all runtime and test dependencies -->
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <unpack>true</unpack>
+            <scope>runtime</scope>
+        </dependencySet>
+        <dependencySet>
+            <outputDirectory>/</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <unpack>true</unpack>
+            <scope>test</scope>
+            <!-- Only include picocli and slf4j-simple for CLI -->
+            <includes>
+                <include>info.picocli:picocli</include>
+                <include>org.slf4j:slf4j-simple</include>
+            </includes>
+        </dependencySet>
+    </dependencySets>
+</assembly>

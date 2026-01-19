@@ -33,6 +33,7 @@ public final class DeviceQuery extends BaseQuery<DeviceQuery> {
     private String label;
     private Boolean includeMonitoringPoints;
     private Boolean includeAlarmRules;
+    private Boolean includeAttributes;
 
     private DeviceQuery() {
     }
@@ -145,6 +146,17 @@ public final class DeviceQuery extends BaseQuery<DeviceQuery> {
         return this;
     }
 
+    /**
+     * 是否包含属性
+     *
+     * @param include 是否包含
+     * @return this
+     */
+    public DeviceQuery includeAttributes(boolean include) {
+        this.includeAttributes = include;
+        return this;
+    }
+
     // ==================== 实现父类抽象方法 ====================
 
     @Override
@@ -169,6 +181,9 @@ public final class DeviceQuery extends BaseQuery<DeviceQuery> {
         }
         if (includeAlarmRules != null) {
             params.put("includeAlarmRules", includeAlarmRules);
+        }
+        if (includeAttributes != null) {
+            params.put("includeAttributes", includeAttributes);
         }
     }
 
@@ -207,5 +222,9 @@ public final class DeviceQuery extends BaseQuery<DeviceQuery> {
 
     public Boolean getIncludeAlarmRules() {
         return includeAlarmRules;
+    }
+
+    public Boolean getIncludeAttributes() {
+        return includeAttributes;
     }
 }

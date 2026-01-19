@@ -93,6 +93,14 @@
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- Picocli for CLI -->
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+            <version>4.7.5</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
@@ -161,6 +169,26 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <!-- Assembly Plugin for CLI JAR -->
+            <!-- 使用: mvn test-compile assembly:single -DskipTests -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.inteagle.sdk.integration.SdkCli</mainClass>
+                        </manifest>
+                    </archive>
+                    <descriptors>
+                        <descriptor>src/assembly/cli.xml</descriptor>
+                    </descriptors>
+                    <outputDirectory>${project.basedir}/bin</outputDirectory>
+                    <finalName>inteagle-cli</finalName>
+                    <appendAssemblyId>false</appendAssemblyId>
+                </configuration>
             </plugin>
             <!-- Central Publishing -->
             <plugin>
