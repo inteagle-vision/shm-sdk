@@ -849,8 +849,14 @@ public class SdkCli implements Runnable {
         }
 
         private void getDevice(InteagleClient client, String deviceId) throws SdkException {
-            if (deviceId.isEmpty()) {
-                parent.printWarning("请提供设备ID: device <id>");
+            if (deviceId.isEmpty() || "help".equalsIgnoreCase(deviceId) || "-h".equals(deviceId)) {
+                System.out.println("  用法: " + parent.cyan("device <id>") + " - 查看设备详情");
+                System.out.println("  示例: device ddbd2770-f508-11f0-8ccb-0d404d4711dc");
+                return;
+            }
+            // 验证 UUID 格式
+            if (!isValidUuid(deviceId)) {
+                parent.printWarning("无效的设备ID格式，应为 UUID: " + deviceId);
                 return;
             }
             Device d = client.devices().get(deviceId);
@@ -940,6 +946,12 @@ public class SdkCli implements Runnable {
                     parent.red(String.valueOf(stats.getCritical())),
                     parent.yellow(String.valueOf(stats.getMajor())),
                     parent.blue(String.valueOf(stats.getWarning())));
+        }
+
+        private boolean isValidUuid(String str) {
+            if (str == null || str.length() != 36) return false;
+            // UUID 格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+            return str.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
         }
     }
 }
