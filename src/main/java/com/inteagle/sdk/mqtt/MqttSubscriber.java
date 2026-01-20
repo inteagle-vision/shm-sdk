@@ -17,13 +17,21 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManagerFactory;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+
+import com.inteagle.sdk.mqtt.data.AlarmData;
+import com.inteagle.sdk.mqtt.data.EventData;
+import com.inteagle.sdk.mqtt.data.ImageData;
+import com.inteagle.sdk.mqtt.data.TelemetryData;
 
 /**
  * MQTT Subscriber for real-time data subscription.
@@ -39,8 +47,9 @@ public class MqttSubscriber implements AutoCloseable {
     // MQTT connection constants
     private static final int CONNECTION_TIMEOUT = 30;
     private static final int KEEP_ALIVE_INTERVAL = 60;
-    private static final int QOS_LEVEL = 1;
+    private static final int DEFAULT_QOS_LEVEL = 1;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 5;
+    private static final int DEFAULT_RECONNECT_DELAY_MS = 3000;
     
     // HMAC algorithm
     private static final String HMAC_ALGORITHM = "HmacSHA256";
@@ -58,6 +67,15 @@ public class MqttSubscriber implements AutoCloseable {
     private MqttClient mqttClient;
     private final Map<String, Consumer<BridgeMessage>> subscriptions = new ConcurrentHashMap<>();
     private final ExecutorService asyncExecutor = Executors.newCachedThreadPool();
+
+    // 可配置的 QoS 级别
+    private int qosLevel = DEFAULT_QOS_LEVEL;
+
+    // 重连计数器
+    private final AtomicInteger reconnectCount = new AtomicInteger(0);
+
+    // 连接状态监听器
+    private Consumer<ConnectionEvent> connectionEventListener;
 
     /**
      * 创建 MQTT 订阅者
@@ -129,10 +147,30 @@ public class MqttSubscriber implements AutoCloseable {
             options.setSocketFactory(getDefaultSSLSocketFactory());
         }
 
-        mqttClient.setCallback(new MqttCallback() {
+        // 使用 MqttCallbackExtended 支持重连后自动重新订阅
+        mqttClient.setCallback(new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                if (reconnect) {
+                    int count = reconnectCount.incrementAndGet();
+                    log.info("Reconnected to {} (count: {}), re-subscribing {} topics...",
+                            serverURI, count, subscriptions.size());
+
+                    // 重新订阅所有 topic
+                    resubscribeAll();
+
+                    // 通知监听器
+                    notifyConnectionEvent(ConnectionEvent.reconnected(serverURI, count));
+                } else {
+                    log.info("Connected to {}", serverURI);
+                    notifyConnectionEvent(ConnectionEvent.connected(serverURI));
+                }
+            }
+
             @Override
             public void connectionLost(Throwable cause) {
                 log.warn("Connection lost: {}", cause.getMessage());
+                notifyConnectionEvent(ConnectionEvent.disconnected(cause.getMessage()));
             }
 
             @Override
@@ -334,14 +372,14 @@ public class MqttSubscriber implements AutoCloseable {
         }
 
         subscriptions.put(topicPattern, handler);
-        mqttClient.subscribe(topicPattern, QOS_LEVEL);
-        log.info("Subscribed to: {}", topicPattern);
+        mqttClient.subscribe(topicPattern, qosLevel);
+        log.info("Subscribed to: {} (QoS={})", topicPattern, qosLevel);
     }
 
     /**
      * Unsubscribe from a topic.
      * <p>Removes the subscription and stops receiving messages for the topic pattern.
-     * 
+     *
      * @param topicPattern the MQTT topic pattern to unsubscribe from
      * @throws MqttException if unsubscription fails
      */
@@ -351,6 +389,188 @@ public class MqttSubscriber implements AutoCloseable {
             subscriptions.remove(topicPattern);
             log.info("Unsubscribed from: {}", topicPattern);
         }
+    }
+
+    // ==================== 类型过滤订阅方法 ====================
+
+    /**
+     * 订阅遥测数据，自动解析为 TelemetryData
+     * <p>Topic pattern: inteagle/{customerId}/#
+     *
+     * @param handler 遥测数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeTelemetry(Consumer<TelemetryData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/#";
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.TELEMETRY) {
+                TelemetryData data = MessageParser.parseTelemetry(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅告警数据，自动解析为 AlarmData
+     * <p>Topic pattern: inteagle/{customerId}/#
+     *
+     * @param handler 告警数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeAlarm(Consumer<AlarmData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/#";
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.ALARM) {
+                AlarmData data = MessageParser.parseAlarm(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅事件数据，自动解析为 EventData
+     * <p>Topic pattern: inteagle/{customerId}/#
+     *
+     * @param handler 事件数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeEvent(Consumer<EventData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/#";
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.EVENT) {
+                EventData data = MessageParser.parseEvent(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅图像数据，自动解析为 ImageData
+     * <p>Topic pattern: inteagle/{customerId}/#
+     *
+     * @param handler 图像数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeImage(Consumer<ImageData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/#";
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.IMAGE) {
+                ImageData data = MessageParser.parseImage(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅指定设备的遥测数据
+     *
+     * @param deviceId 设备 ID
+     * @param handler 遥测数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeDeviceTelemetry(String deviceId, Consumer<TelemetryData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/d/" + deviceId;
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.TELEMETRY) {
+                TelemetryData data = MessageParser.parseTelemetry(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅指定设备的告警数据
+     *
+     * @param deviceId 设备 ID
+     * @param handler 告警数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeDeviceAlarm(String deviceId, Consumer<AlarmData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/d/" + deviceId;
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.ALARM) {
+                AlarmData data = MessageParser.parseAlarm(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅项目下所有遥测数据
+     *
+     * @param projectId 项目 ID
+     * @param handler 遥测数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeProjectTelemetry(String projectId, Consumer<TelemetryData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/p/" + projectId + "/#";
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.TELEMETRY) {
+                TelemetryData data = MessageParser.parseTelemetry(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅项目下所有告警数据
+     *
+     * @param projectId 项目 ID
+     * @param handler 告警数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeProjectAlarm(String projectId, Consumer<AlarmData> handler) throws MqttException {
+        String topic = TOPIC_PREFIX + "/" + customerId + "/p/" + projectId + "/#";
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.ALARM) {
+                AlarmData data = MessageParser.parseAlarm(msg);
+                handler.accept(data);
+            }
+        });
+    }
+
+    /**
+     * 订阅所有类型的数据，使用统一回调
+     *
+     * @param telemetryHandler 遥测数据处理器 (可为 null)
+     * @param alarmHandler 告警数据处理器 (可为 null)
+     * @param eventHandler 事件数据处理器 (可为 null)
+     * @param imageHandler 图像数据处理器 (可为 null)
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeAll(
+            Consumer<TelemetryData> telemetryHandler,
+            Consumer<AlarmData> alarmHandler,
+            Consumer<EventData> eventHandler,
+            Consumer<ImageData> imageHandler) throws MqttException {
+
+        String topic = TOPIC_PREFIX + "/" + customerId + "/#";
+        subscribe(topic, msg -> {
+            switch (msg.getType()) {
+                case TELEMETRY:
+                    if (telemetryHandler != null) {
+                        telemetryHandler.accept(MessageParser.parseTelemetry(msg));
+                    }
+                    break;
+                case ALARM:
+                    if (alarmHandler != null) {
+                        alarmHandler.accept(MessageParser.parseAlarm(msg));
+                    }
+                    break;
+                case EVENT:
+                    if (eventHandler != null) {
+                        eventHandler.accept(MessageParser.parseEvent(msg));
+                    }
+                    break;
+                case IMAGE:
+                    if (imageHandler != null) {
+                        imageHandler.accept(MessageParser.parseImage(msg));
+                    }
+                    break;
+                default:
+                    log.debug("Unknown message type: {}", msg.getType());
+            }
+        });
     }
 
     private void handleMessage(String topic, MqttMessage mqttMessage) {
@@ -397,6 +617,229 @@ public class MqttSubscriber implements AutoCloseable {
             return sslContext.getSocketFactory();
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize SSL", e);
+        }
+    }
+
+    // ==================== 重连与 QoS 配置 ====================
+
+    /**
+     * 重新订阅所有已注册的 topic（重连后调用）
+     */
+    private void resubscribeAll() {
+        for (String topic : subscriptions.keySet()) {
+            try {
+                mqttClient.subscribe(topic, qosLevel);
+                log.debug("Re-subscribed to: {}", topic);
+            } catch (MqttException e) {
+                log.error("Failed to re-subscribe to {}: {}", topic, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 通知连接事件监听器
+     */
+    private void notifyConnectionEvent(ConnectionEvent event) {
+        if (connectionEventListener != null) {
+            try {
+                asyncExecutor.submit(() -> connectionEventListener.accept(event));
+            } catch (Exception e) {
+                log.error("Error notifying connection event listener: {}", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 设置连接事件监听器
+     * <p>监听连接、断开、重连等事件
+     *
+     * @param listener 连接事件监听器
+     */
+    public void setConnectionEventListener(Consumer<ConnectionEvent> listener) {
+        this.connectionEventListener = listener;
+    }
+
+    /**
+     * 设置 QoS 级别
+     * <p>必须在订阅之前设置
+     *
+     * @param qosLevel QoS 级别 (0, 1, 或 2)
+     * @throws IllegalArgumentException 如果 QoS 级别无效
+     */
+    public void setQosLevel(int qosLevel) {
+        if (qosLevel < 0 || qosLevel > 2) {
+            throw new IllegalArgumentException("QoS level must be 0, 1, or 2");
+        }
+        this.qosLevel = qosLevel;
+    }
+
+    /**
+     * 获取当前 QoS 级别
+     *
+     * @return QoS 级别
+     */
+    public int getQosLevel() {
+        return qosLevel;
+    }
+
+    /**
+     * 获取重连次数
+     *
+     * @return 重连次数
+     */
+    public int getReconnectCount() {
+        return reconnectCount.get();
+    }
+
+    // ==================== 带过滤器的订阅方法 ====================
+
+    /**
+     * 订阅遥测数据，并按 key 过滤
+     * <p>只有指定的 key 会被传递给 handler
+     *
+     * @param keys 需要接收的遥测数据 key 集合
+     * @param handler 遥测数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeTelemetryWithFilter(Set<String> keys, Consumer<TelemetryData> handler) throws MqttException {
+        if (keys == null || keys.isEmpty()) {
+            throw new IllegalArgumentException("keys cannot be null or empty");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("handler cannot be null");
+        }
+
+        String topic = TOPIC_PREFIX + "/" + customerId + "/#";
+        Set<String> filterKeys = new HashSet<>(keys); // 复制以避免外部修改
+
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.TELEMETRY) {
+                TelemetryData data = MessageParser.parseTelemetry(msg);
+                // 过滤只保留指定的 key
+                TelemetryData filtered = data.filter(filterKeys);
+                if (filtered != null) {
+                    handler.accept(filtered);
+                }
+            }
+        });
+    }
+
+    /**
+     * 订阅指定设备的遥测数据，并按 key 过滤
+     *
+     * @param deviceId 设备 ID
+     * @param keys 需要接收的遥测数据 key 集合
+     * @param handler 遥测数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeDeviceTelemetryWithFilter(String deviceId, Set<String> keys,
+                                                    Consumer<TelemetryData> handler) throws MqttException {
+        if (deviceId == null || deviceId.isEmpty()) {
+            throw new IllegalArgumentException("deviceId cannot be null or empty");
+        }
+        if (keys == null || keys.isEmpty()) {
+            throw new IllegalArgumentException("keys cannot be null or empty");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("handler cannot be null");
+        }
+
+        String topic = TOPIC_PREFIX + "/" + customerId + "/d/" + deviceId;
+        Set<String> filterKeys = new HashSet<>(keys);
+
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.TELEMETRY) {
+                TelemetryData data = MessageParser.parseTelemetry(msg);
+                TelemetryData filtered = data.filter(filterKeys);
+                if (filtered != null) {
+                    handler.accept(filtered);
+                }
+            }
+        });
+    }
+
+    /**
+     * 订阅项目下所有遥测数据，并按 key 过滤
+     *
+     * @param projectId 项目 ID
+     * @param keys 需要接收的遥测数据 key 集合
+     * @param handler 遥测数据处理器
+     * @throws MqttException if subscription fails
+     */
+    public void subscribeProjectTelemetryWithFilter(String projectId, Set<String> keys,
+                                                     Consumer<TelemetryData> handler) throws MqttException {
+        if (projectId == null || projectId.isEmpty()) {
+            throw new IllegalArgumentException("projectId cannot be null or empty");
+        }
+        if (keys == null || keys.isEmpty()) {
+            throw new IllegalArgumentException("keys cannot be null or empty");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("handler cannot be null");
+        }
+
+        String topic = TOPIC_PREFIX + "/" + customerId + "/p/" + projectId + "/#";
+        Set<String> filterKeys = new HashSet<>(keys);
+
+        subscribe(topic, msg -> {
+            if (msg.getType() == MessageType.TELEMETRY) {
+                TelemetryData data = MessageParser.parseTelemetry(msg);
+                TelemetryData filtered = data.filter(filterKeys);
+                if (filtered != null) {
+                    handler.accept(filtered);
+                }
+            }
+        });
+    }
+
+    // ==================== 连接事件类 ====================
+
+    /**
+     * 连接事件，用于通知连接状态变化
+     */
+    public static class ConnectionEvent {
+        public enum Type {
+            CONNECTED,      // 首次连接成功
+            DISCONNECTED,   // 断开连接
+            RECONNECTED     // 重新连接成功
+        }
+
+        private final Type type;
+        private final String serverUri;
+        private final String message;
+        private final int reconnectCount;
+        private final long timestamp;
+
+        private ConnectionEvent(Type type, String serverUri, String message, int reconnectCount) {
+            this.type = type;
+            this.serverUri = serverUri;
+            this.message = message;
+            this.reconnectCount = reconnectCount;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        public static ConnectionEvent connected(String serverUri) {
+            return new ConnectionEvent(Type.CONNECTED, serverUri, "Connected", 0);
+        }
+
+        public static ConnectionEvent disconnected(String reason) {
+            return new ConnectionEvent(Type.DISCONNECTED, null, reason, 0);
+        }
+
+        public static ConnectionEvent reconnected(String serverUri, int count) {
+            return new ConnectionEvent(Type.RECONNECTED, serverUri, "Reconnected", count);
+        }
+
+        public Type getType() { return type; }
+        public String getServerUri() { return serverUri; }
+        public String getMessage() { return message; }
+        public int getReconnectCount() { return reconnectCount; }
+        public long getTimestamp() { return timestamp; }
+
+        @Override
+        public String toString() {
+            return String.format("ConnectionEvent{type=%s, serverUri='%s', message='%s', reconnectCount=%d}",
+                    type, serverUri, message, reconnectCount);
         }
     }
 }

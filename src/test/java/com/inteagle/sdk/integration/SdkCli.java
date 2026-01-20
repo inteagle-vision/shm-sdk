@@ -21,7 +21,15 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import com.inteagle.sdk.mqtt.MqttSubscriber;
+import com.inteagle.sdk.mqtt.data.TelemetryData;
+import com.inteagle.sdk.mqtt.data.AlarmData;
 
 /**
  * Inteagle Cloud SDK CLI
@@ -44,7 +52,7 @@ import java.util.concurrent.Callable;
 @Command(
     name = "inteagle",
     mixinStandardHelpOptions = true,
-    version = "Inteagle SDK CLI 0.3.1",
+    version = "Inteagle SDK CLI 0.3.2",
     description = "Inteagle Cloud Platform SDK 命令行工具",
     subcommands = {
         SdkCli.DevicesCommand.class,
@@ -53,6 +61,7 @@ import java.util.concurrent.Callable;
         SdkCli.TelemetryCommand.class,
         SdkCli.AlarmsCommand.class,
         SdkCli.AlarmRulesCommand.class,
+        SdkCli.MqttCommand.class,
         SdkCli.InteractiveCommand.class,
         CommandLine.HelpCommand.class
     }
@@ -76,6 +85,21 @@ public class SdkCli implements Runnable {
             scope = ScopeType.INHERIT)
     String secretKey;
 
+    @Option(names = {"--mqtt-host"},
+            description = "MQTT Broker 地址 (环境变量: MQTT_BROKER)",
+            scope = ScopeType.INHERIT)
+    String mqttHost;
+
+    @Option(names = {"--mqtt-port"},
+            description = "MQTT Broker 端口 (环境变量: MQTT_PORT)",
+            scope = ScopeType.INHERIT)
+    Integer mqttPort;
+
+    @Option(names = {"--mqtt-tls"},
+            description = "使用 TLS 连接 MQTT",
+            scope = ScopeType.INHERIT)
+    boolean mqttUseTls;
+
     // 从环境变量获取默认值
     String getEndpoint() {
         if (endpoint != null && !endpoint.isBlank()) return endpoint;
@@ -91,6 +115,21 @@ public class SdkCli implements Runnable {
     String getSecretKey() {
         if (secretKey != null && !secretKey.isBlank()) return secretKey;
         return System.getenv("INTEAGLE_SECRET_KEY");
+    }
+
+    String getMqttHost() {
+        if (mqttHost != null && !mqttHost.isBlank()) return mqttHost;
+        String env = System.getenv("MQTT_BROKER");
+        return (env != null && !env.isBlank()) ? env : "broker.shm.inteagle.com";
+    }
+
+    int getMqttPort() {
+        if (mqttPort != null) return mqttPort;
+        String env = System.getenv("MQTT_PORT");
+        if (env != null && !env.isBlank()) {
+            try { return Integer.parseInt(env); } catch (NumberFormatException ignored) {}
+        }
+        return mqttUseTls ? 8883 : 1883;
     }
 
     boolean validateCredentials() {
@@ -768,6 +807,260 @@ public class SdkCli implements Runnable {
             } catch (SdkException e) {
                 parent.printError(e.getErrorCode() + ": " + e.getMessage());
             }
+        }
+    }
+
+    // ==================== MQTT 命令 ====================
+
+    @Command(name = "mqtt", aliases = {"m"},
+             description = "MQTT 实时订阅命令",
+             subcommands = {CommandLine.HelpCommand.class})
+    static class MqttCommand implements Runnable {
+
+        @ParentCommand
+        SdkCli parent;
+
+        @Override
+        public void run() {
+            System.out.println("使用 " + parent.cyan("mqtt listen") + " 订阅所有数据");
+            System.out.println("使用 " + parent.cyan("mqtt telemetry") + " 订阅遥测数据");
+            System.out.println("使用 " + parent.cyan("mqtt alarm") + " 订阅告警数据");
+            System.out.println("使用 " + parent.cyan("mqtt device <id>") + " 订阅指定设备");
+        }
+
+        @Command(name = "listen", aliases = {"l"}, description = "订阅所有数据")
+        void listen(
+                @Option(names = {"--duration", "-d"}, description = "监听时长(秒), 0=无限", defaultValue = "0") int duration,
+                @Option(names = {"--qos"}, description = "QoS 级别 (0,1,2)", defaultValue = "1") int qos
+        ) {
+            parent.printHeader("MQTT 实时订阅 (所有数据)");
+            subscribeWithOptions(null, null, duration, qos, false, false);
+        }
+
+        @Command(name = "telemetry", aliases = {"ts"}, description = "订阅遥测数据")
+        void telemetry(
+                @Option(names = {"--device", "-D"}, description = "设备ID") String deviceId,
+                @Option(names = {"--project", "-p"}, description = "项目ID") String projectId,
+                @Option(names = {"--keys", "-k"}, description = "过滤的键名(逗号分隔)") String keys,
+                @Option(names = {"--duration", "-d"}, description = "监听时长(秒), 0=无限", defaultValue = "0") int duration,
+                @Option(names = {"--qos"}, description = "QoS 级别 (0,1,2)", defaultValue = "1") int qos
+        ) {
+            parent.printHeader("MQTT 实时订阅 (遥测数据)");
+            subscribeWithOptions(deviceId, projectId, duration, qos, true, false);
+        }
+
+        @Command(name = "alarm", aliases = {"a"}, description = "订阅告警数据")
+        void alarm(
+                @Option(names = {"--device", "-D"}, description = "设备ID") String deviceId,
+                @Option(names = {"--project", "-p"}, description = "项目ID") String projectId,
+                @Option(names = {"--duration", "-d"}, description = "监听时长(秒), 0=无限", defaultValue = "0") int duration,
+                @Option(names = {"--qos"}, description = "QoS 级别 (0,1,2)", defaultValue = "1") int qos
+        ) {
+            parent.printHeader("MQTT 实时订阅 (告警数据)");
+            subscribeWithOptions(deviceId, projectId, duration, qos, false, true);
+        }
+
+        @Command(name = "device", aliases = {"d"}, description = "订阅指定设备的所有数据")
+        void device(
+                @Parameters(index = "0", description = "设备ID") String deviceId,
+                @Option(names = {"--duration", "-d"}, description = "监听时长(秒), 0=无限", defaultValue = "0") int duration,
+                @Option(names = {"--qos"}, description = "QoS 级别 (0,1,2)", defaultValue = "1") int qos
+        ) {
+            parent.printHeader("MQTT 实时订阅 (设备: " + deviceId + ")");
+            subscribeWithOptions(deviceId, null, duration, qos, false, false);
+        }
+
+        private void subscribeWithOptions(String deviceId, String projectId, int duration,
+                                          int qos, boolean telemetryOnly, boolean alarmOnly) {
+            if (!parent.validateCredentials()) return;
+
+            String brokerHost = parent.getMqttHost();
+            int brokerPort = parent.getMqttPort();
+
+            parent.printInfo("Broker: " + brokerHost + ":" + brokerPort + (parent.mqttUseTls ? " (TLS)" : ""));
+            parent.printInfo("QoS: " + qos);
+            if (duration > 0) {
+                parent.printInfo("持续时间: " + duration + " 秒");
+            } else {
+                parent.printInfo("持续时间: 无限 (Ctrl+C 退出)");
+            }
+
+            try (InteagleClient client = parent.createClient()) {
+                // 获取 customerId
+                CredentialInfo info = client.me();
+                String customerId = info.getCustomerId();
+                parent.printInfo("Customer ID: " + customerId);
+
+                // 创建 MQTT Subscriber
+                MqttSubscriber subscriber = new MqttSubscriber(
+                        brokerHost, brokerPort,
+                        parent.getAccessKey(), parent.getSecretKey(),
+                        customerId, parent.mqttUseTls
+                );
+
+                subscriber.setQosLevel(qos);
+
+                // 设置连接事件监听器
+                subscriber.setConnectionEventListener(event -> {
+                    switch (event.getType()) {
+                        case CONNECTED -> parent.printSuccess("MQTT 连接成功");
+                        case DISCONNECTED -> parent.printWarning("MQTT 连接断开: " + event.getMessage());
+                        case RECONNECTED -> parent.printInfo("MQTT 重连成功 (第" + event.getReconnectCount() + "次)");
+                    }
+                });
+
+                // 连接
+                parent.printInfo("正在连接 MQTT Broker...");
+                subscriber.connect();
+
+                AtomicInteger messageCount = new AtomicInteger(0);
+                CountDownLatch latch = new CountDownLatch(1);
+
+                // 设置关闭钩子
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    try {
+                        subscriber.disconnect();
+                        parent.printInfo("\n已断开连接, 共收到 " + messageCount.get() + " 条消息");
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                    latch.countDown();
+                }));
+
+                System.out.println();
+                parent.printSuccess("已连接，等待消息... (Ctrl+C 退出)");
+                System.out.println(parent.dim("─".repeat(60)));
+
+                // 订阅
+                if (telemetryOnly) {
+                    subscribeTelemetry(subscriber, deviceId, projectId, messageCount);
+                } else if (alarmOnly) {
+                    subscribeAlarm(subscriber, deviceId, projectId, messageCount);
+                } else {
+                    subscribeAll(subscriber, deviceId, projectId, messageCount);
+                }
+
+                // 等待
+                if (duration > 0) {
+                    Thread.sleep(duration * 1000L);
+                    subscriber.disconnect();
+                    parent.printInfo("监听结束, 共收到 " + messageCount.get() + " 条消息");
+                } else {
+                    // 无限等待
+                    latch.await();
+                }
+
+            } catch (Exception e) {
+                parent.printError("MQTT 错误: " + e.getMessage());
+            }
+        }
+
+        private void subscribeTelemetry(MqttSubscriber subscriber, String deviceId, String projectId,
+                                         AtomicInteger messageCount) throws Exception {
+            if (deviceId != null) {
+                subscriber.subscribeDeviceTelemetry(deviceId, data -> {
+                    printTelemetryData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅设备遥测: " + deviceId);
+            } else if (projectId != null) {
+                subscriber.subscribeProjectTelemetry(projectId, data -> {
+                    printTelemetryData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅项目遥测: " + projectId);
+            } else {
+                subscriber.subscribeTelemetry(data -> {
+                    printTelemetryData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅所有遥测数据");
+            }
+        }
+
+        private void subscribeAlarm(MqttSubscriber subscriber, String deviceId, String projectId,
+                                     AtomicInteger messageCount) throws Exception {
+            if (deviceId != null) {
+                subscriber.subscribeDeviceAlarm(deviceId, data -> {
+                    printAlarmData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅设备告警: " + deviceId);
+            } else if (projectId != null) {
+                subscriber.subscribeProjectAlarm(projectId, data -> {
+                    printAlarmData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅项目告警: " + projectId);
+            } else {
+                subscriber.subscribeAlarm(data -> {
+                    printAlarmData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅所有告警数据");
+            }
+        }
+
+        private void subscribeAll(MqttSubscriber subscriber, String deviceId, String projectId,
+                                   AtomicInteger messageCount) throws Exception {
+            if (deviceId != null) {
+                // 订阅单个设备的所有数据
+                subscriber.subscribeDeviceTelemetry(deviceId, data -> {
+                    printTelemetryData(data, messageCount.incrementAndGet());
+                });
+                subscriber.subscribeDeviceAlarm(deviceId, data -> {
+                    printAlarmData(data, messageCount.incrementAndGet());
+                });
+                parent.printInfo("已订阅设备: " + deviceId);
+            } else {
+                // 订阅所有数据
+                subscriber.subscribeAll(
+                    data -> printTelemetryData(data, messageCount.incrementAndGet()),
+                    data -> printAlarmData(data, messageCount.incrementAndGet()),
+                    null,  // event handler
+                    null   // image handler
+                );
+                parent.printInfo("已订阅所有数据");
+            }
+        }
+
+        private void printTelemetryData(TelemetryData data, int count) {
+            String time = TIME_FMT.format(Instant.ofEpochMilli(data.getTimestamp()));
+            StringBuilder sb = new StringBuilder();
+            sb.append(parent.dim("[" + count + "] "));
+            sb.append(parent.cyan("遥测"));
+            sb.append(" | ").append(parent.dim(time));
+            sb.append(" | ").append(parent.bold(data.getDeviceId() != null ? data.getDeviceId() : "-"));
+            sb.append("\n    ");
+
+            Map<String, Object> values = data.getValues();
+            int i = 0;
+            for (Map.Entry<String, Object> entry : values.entrySet()) {
+                if (i > 0) sb.append(", ");
+                sb.append(parent.yellow(entry.getKey())).append("=").append(entry.getValue());
+                i++;
+                if (i >= 5 && values.size() > 5) {
+                    sb.append(" ... (+" + (values.size() - 5) + " more)");
+                    break;
+                }
+            }
+
+            System.out.println(sb);
+        }
+
+        private void printAlarmData(AlarmData data, int count) {
+            String time = TIME_FMT.format(Instant.ofEpochMilli(data.getTimestamp()));
+            AlarmData.AlarmSeverity severity = data.getSeverity();
+            String severityStr = severity != null ? severity.name() : "UNKNOWN";
+            String severityColored = switch (severity != null ? severity : AlarmData.AlarmSeverity.UNKNOWN) {
+                case ACTION -> parent.red(severityStr);
+                case ALARM -> parent.yellow(severityStr);
+                case ALERT -> parent.blue(severityStr);
+                default -> parent.dim(severityStr);
+            };
+
+            System.out.println(
+                parent.dim("[" + count + "] ") +
+                parent.red("告警") +
+                " | " + parent.dim(time) +
+                " | " + severityColored +
+                " | " + parent.bold(data.getAlarmType() != null ? data.getAlarmType() : "-") +
+                " | 来源: " + (data.getOriginatorId() != null ? data.getOriginatorId() : "-")
+            );
         }
     }
 

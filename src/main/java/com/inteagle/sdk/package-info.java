@@ -39,7 +39,6 @@
  * Keys should be securely stored and never hardcoded in production applications.
  *
  * @see com.inteagle.sdk.InteagleClient
- * @see com.inteagle.sdk.rest.RestClient
  * @see com.inteagle.sdk.mqtt.MqttSubscriber
  */
 package com.inteagle.sdk;

@@ -4,14 +4,22 @@
 package com.inteagle.sdk;
 
 import com.inteagle.sdk.api.*;
+import com.inteagle.sdk.exception.SdkException;
 import com.inteagle.sdk.internal.impl.*;
+import com.inteagle.sdk.internal.response.CredentialInfoResponse;
+import com.inteagle.sdk.internal.response.MqttInfoResponse;
 import com.inteagle.sdk.internal.serialization.JsonSerializer;
 import com.inteagle.sdk.internal.transport.Transport;
 import com.inteagle.sdk.internal.transport.TransportFactory;
+import com.inteagle.sdk.model.CredentialInfo;
+import com.inteagle.sdk.model.MqttInfo;
 import com.inteagle.sdk.mqtt.MqttSubscriber;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -67,7 +75,11 @@ import java.util.Objects;
  */
 public final class InteagleClient implements Closeable {
 
+    private static final Logger log = LoggerFactory.getLogger(InteagleClient.class);
+
     private final Transport transport;
+    private final String accessKey;
+    private final String secretKey;
     private final TelemetryApi telemetry;
     private final DeviceApi devices;
     private final AlarmApi alarms;
@@ -76,7 +88,17 @@ public final class InteagleClient implements Closeable {
     private final ProjectApi projects;
     private final MqttSubscriber mqttSubscriber;
 
+    // MQTT broker 配置 (用户提供)
+    private final String mqttHost;
+    private final int mqttPort;
+    private final boolean mqttUseTls;
+
     private InteagleClient(Builder builder) {
+        this.accessKey = builder.accessKey;
+        this.secretKey = builder.secretKey;
+        this.mqttHost = builder.mqttHost;
+        this.mqttPort = builder.mqttPort;
+        this.mqttUseTls = builder.mqttUseTls;
         this.transport = TransportFactory.createHttp(
                 builder.endpoint,
                 builder.accessKey,
@@ -93,7 +115,7 @@ public final class InteagleClient implements Closeable {
         this.points = new PointApiImpl(transport);
         this.projects = new ProjectApiImpl(transport);
 
-        // 初始化 MQTT（如果配置了）
+        // 初始化 MQTT（如果配置了完整信息）
         if (builder.mqttHost != null && builder.customerId != null) {
             this.mqttSubscriber = new MqttSubscriber(
                     builder.mqttHost,
@@ -166,6 +188,111 @@ public final class InteagleClient implements Closeable {
      */
     public boolean hasMqtt() {
         return mqttSubscriber != null;
+    }
+
+    // ==================== 凭据信息 API ====================
+
+    /**
+     * 获取当前凭据信息
+     * <p>
+     * 通过 /me 接口获取当前 AK/SK 对应的凭据信息，包括 customerId。
+     *
+     * <p>使用示例:
+     * <pre>{@code
+     * CredentialInfo info = client.me();
+     * String customerId = info.getCustomerId();  // 用于 MQTT Topic
+     * }</pre>
+     *
+     * @return 凭据信息
+     * @throws SdkException 如果请求失败
+     */
+    public CredentialInfo me() throws SdkException {
+        CredentialInfoResponse response = transport.get("/credential", null, CredentialInfoResponse.class);
+        if (!response.isSuccess()) {
+            throw new SdkException(response.getStatus(), "API_ERROR",
+                    response.getErrorMessage() != null ? response.getErrorMessage() : "Failed to get credential info");
+        }
+        return response.getData();
+    }
+
+    /**
+     * 获取 MQTT 连接信息
+     * <p>
+     * 通过 /me/mqtt 接口获取 MQTT 连接所需的配置信息。
+     *
+     * <p>使用示例:
+     * <pre>{@code
+     * MqttInfo mqttInfo = client.mqttInfo();
+     * String broker = mqttInfo.getBrokerHost();
+     * int port = mqttInfo.getBrokerPort();
+     * String customerId = mqttInfo.getCustomerId();
+     *
+     * // 创建 MQTT 订阅器
+     * MqttSubscriber subscriber = new MqttSubscriber(
+     *     broker, port, accessKey, secretKey, customerId, mqttInfo.isUseTls()
+     * );
+     * }</pre>
+     *
+     * @return MQTT 连接信息
+     * @throws SdkException 如果请求失败
+     */
+    public MqttInfo mqttInfo() throws SdkException {
+        MqttInfoResponse response = transport.get("/credential/mqtt", null, MqttInfoResponse.class);
+        if (!response.isSuccess()) {
+            throw new SdkException(response.getStatus(), "API_ERROR",
+                    response.getErrorMessage() != null ? response.getErrorMessage() : "Failed to get MQTT info");
+        }
+        return response.getData();
+    }
+
+    /**
+     * 创建 MQTT 订阅器 (自动获取 customerId)
+     * <p>
+     * 使用 Builder 配置的 MQTT broker 地址，自动从 API 获取 customerId。
+     *
+     * <p>使用示例:
+     * <pre>{@code
+     * InteagleClient client = InteagleClient.builder()
+     *     .endpoint("https://api.shm.inteagle.com")
+     *     .credentials("ak_xxx", "sk_xxx")
+     *     .mqtt("broker.shm.inteagle.com", 1883)  // 用户配置 broker 地址
+     *     .mqttUseTls(false)
+     *     .build();
+     *
+     * try (MqttSubscriber subscriber = client.createMqttSubscriber()) {
+     *     subscriber.connect();
+     *     subscriber.subscribeTelemetry(telemetry -> {
+     *         System.out.println("Received: " + telemetry.getDeviceId());
+     *     });
+     * }
+     * }</pre>
+     *
+     * @return MQTT 订阅器
+     * @throws SdkException 如果未配置 MQTT broker 或获取 customerId 失败
+     */
+    public MqttSubscriber createMqttSubscriber() throws SdkException {
+        if (mqttHost == null) {
+            throw new SdkException(400, "MQTT_NOT_CONFIGURED",
+                    "MQTT broker not configured. Use .mqtt(host, port) in builder.");
+        }
+
+        // 从 API 获取 customerId
+        CredentialInfo info = me();
+        if (info == null || info.getCustomerId() == null) {
+            throw new SdkException(500, "MQTT_CONFIG_ERROR", "Failed to get customerId from API");
+        }
+
+        log.debug("Creating MQTT subscriber: host={}, port={}, customerId={}",
+                mqttHost, mqttPort, info.getCustomerId());
+
+        return new MqttSubscriber(
+                mqttHost,
+                mqttPort,
+                accessKey,
+                secretKey,
+                info.getCustomerId(),
+                mqttUseTls
+        );
     }
 
     // ==================== 生命周期 ====================
@@ -330,6 +457,19 @@ public final class InteagleClient implements Closeable {
          */
         public Builder mqtt(String host, String customerId) {
             return mqtt(host, 8883, customerId);
+        }
+
+        /**
+         * 配置 MQTT broker（customerId 将从 API 自动获取）
+         *
+         * @param host MQTT broker 地址
+         * @param port MQTT broker 端口
+         * @return this
+         */
+        public Builder mqtt(String host, int port) {
+            this.mqttHost = host;
+            this.mqttPort = port;
+            return this;
         }
 
         /**
