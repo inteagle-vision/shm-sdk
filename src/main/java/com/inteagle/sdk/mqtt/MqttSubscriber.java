@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import com.inteagle.sdk.entity.Entity;
 import com.inteagle.sdk.mqtt.data.AlarmData;
 import com.inteagle.sdk.mqtt.data.EventData;
 import com.inteagle.sdk.mqtt.data.ImageData;
@@ -578,10 +579,14 @@ public class MqttSubscriber implements AutoCloseable {
             String payload = new String(mqttMessage.getPayload());
             JsonNode json = MAPPER.readTree(payload);
 
+            // Parse entity field if present
+            Entity entity = Entity.from(json.path("entity"));
+
             BridgeMessage message = BridgeMessage.builder()
                     .topic(topic)
                     .type(MessageType.fromString(json.path("type").asText()))
                     .ts(json.path("ts").asLong())
+                    .entity(entity)
                     .payload(json.path("payload"))
                     .rawPayload(payload)
                     .build();

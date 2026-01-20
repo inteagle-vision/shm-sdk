@@ -1073,6 +1073,8 @@ public class SdkCli implements Runnable {
         @ParentCommand
         SdkCli parent;
 
+        private MqttSubscriptionManager mqttManager;
+
         @Override
         public void run() {
             if (!parent.validateCredentials()) {
@@ -1089,6 +1091,59 @@ public class SdkCli implements Runnable {
             try {
                 client = parent.createClient();
                 parent.printSuccess("连接成功");
+
+                // 创建 MQTT 订阅管理器
+                mqttManager = new MqttSubscriptionManager(new MqttSubscriptionManager.OutputFormatter() {
+                    @Override
+                    public void printSuccess(String msg) {
+                        parent.printSuccess(msg);
+                    }
+
+                    @Override
+                    public void printInfo(String msg) {
+                        parent.printInfo(msg);
+                    }
+
+                    @Override
+                    public void printWarning(String msg) {
+                        parent.printWarning(msg);
+                    }
+
+                    @Override
+                    public void printError(String msg) {
+                        parent.printError(msg);
+                    }
+
+                    @Override
+                    public void printSeparator() {
+                        System.out.println(parent.dim("─".repeat(60)));
+                    }
+
+                    @Override
+                    public String bold(String text) {
+                        return parent.bold(text);
+                    }
+
+                    @Override
+                    public String cyan(String text) {
+                        return parent.cyan(text);
+                    }
+
+                    @Override
+                    public String green(String text) {
+                        return parent.green(text);
+                    }
+
+                    @Override
+                    public String yellow(String text) {
+                        return parent.yellow(text);
+                    }
+
+                    @Override
+                    public String dim(String text) {
+                        return parent.dim(text);
+                    }
+                });
 
                 while (true) {
                     System.out.print(parent.cyan("\ninteagle> "));
@@ -1108,6 +1163,10 @@ public class SdkCli implements Runnable {
             } catch (Exception e) {
                 parent.printError("连接失败: " + e.getMessage());
             } finally {
+                // 清理 MQTT 订阅
+                if (mqttManager != null && mqttManager.isRunning()) {
+                    mqttManager.stop();
+                }
                 if (client != null) client.close();
                 parent.printInfo("再见!");
             }
@@ -1127,6 +1186,7 @@ public class SdkCli implements Runnable {
                 case "telemetry", "ts" -> queryTelemetry(client, args);
                 case "alarms", "a" -> showAlarms(client);
                 case "stats" -> showAlarmStats(client);
+                case "mqtt", "m" -> executeMqttCommand(client, args);
                 default -> parent.printWarning("未知命令: " + cmd + " (输入 'help' 查看帮助)");
             }
         }
@@ -1141,6 +1201,12 @@ public class SdkCli implements Runnable {
             System.out.println("  " + parent.cyan("telemetry <id> <keys> [hours]") + " - 查询遥测数据");
             System.out.println("  " + parent.cyan("alarms") + "           - 查看活跃告警");
             System.out.println("  " + parent.cyan("stats") + "            - 告警统计");
+            System.out.println();
+            System.out.println(parent.bold("MQTT 实时订阅:"));
+            System.out.println("  " + parent.cyan("mqtt start [topic]") + " - 启动 MQTT 订阅 (默认: 所有数据)");
+            System.out.println("  " + parent.cyan("mqtt stop") + "        - 停止 MQTT 订阅");
+            System.out.println("  " + parent.cyan("mqtt status") + "      - 查看订阅状态");
+            System.out.println();
             System.out.println("  " + parent.cyan("help") + "             - 显示此帮助");
             System.out.println("  " + parent.cyan("quit") + "             - 退出");
         }
@@ -1319,6 +1385,124 @@ public class SdkCli implements Runnable {
             if (str == null || str.length() != 36) return false;
             // UUID 格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
             return str.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+        }
+
+        /**
+         * 执行 MQTT 命令
+         */
+        private void executeMqttCommand(InteagleClient client, String args) throws SdkException {
+            String[] parts = args.split("\\s+", 2);
+            String subCmd = parts.length > 0 ? parts[0].toLowerCase() : "";
+            String subArgs = parts.length > 1 ? parts[1] : "";
+
+            switch (subCmd) {
+                case "start" -> mqttStart(client, subArgs);
+                case "stop" -> mqttStop();
+                case "status" -> mqttStatus();
+                case "" -> mqttHelp();
+                default -> {
+                    parent.printWarning("未知的 mqtt 子命令: " + subCmd);
+                    mqttHelp();
+                }
+            }
+        }
+
+        private void mqttHelp() {
+            System.out.println();
+            System.out.println(parent.bold("MQTT 实时订阅命令:"));
+            System.out.println("  " + parent.cyan("mqtt start [topic]") + " - 启动订阅");
+            System.out.println("    示例:");
+            System.out.println("      mqtt start              - 订阅所有数据");
+            System.out.println("      mqtt start telemetry    - 仅订阅遥测数据");
+            System.out.println("      mqtt start alarm        - 仅订阅告警数据");
+            System.out.println();
+            System.out.println("  " + parent.cyan("mqtt stop") + "          - 停止订阅");
+            System.out.println("  " + parent.cyan("mqtt status") + "        - 查看订阅状态");
+            System.out.println();
+            System.out.println(parent.dim("提示: 订阅后实时消息将显示在下方，输入命令不受影响"));
+        }
+
+        private void mqttStart(InteagleClient client, String topicType) throws SdkException {
+            if (mqttManager.isRunning()) {
+                parent.printWarning("MQTT 订阅已在运行中，请先执行 'mqtt stop'");
+                return;
+            }
+
+            try {
+                // 获取 customerId
+                CredentialInfo info = client.me();
+                String customerId = info.getCustomerId();
+
+                // 构建订阅主题
+                String topic = buildTopic(customerId, topicType);
+
+                // 启动订阅
+                mqttManager.start(
+                        parent.getMqttHost(),
+                        parent.getMqttPort(),
+                        parent.getAccessKey(),
+                        parent.getSecretKey(),
+                        customerId,
+                        parent.mqttUseTls,
+                        topic
+                );
+
+            } catch (Exception e) {
+                parent.printError("启动 MQTT 订阅失败: " + e.getMessage());
+                if (e.getCause() != null) {
+                    parent.printError("原因: " + e.getCause().getMessage());
+                }
+            }
+        }
+
+        private void mqttStop() {
+            if (!mqttManager.isRunning()) {
+                parent.printInfo("MQTT 订阅未运行");
+                return;
+            }
+
+            mqttManager.stop();
+        }
+
+        private void mqttStatus() {
+            MqttSubscriptionManager.SubscriptionStatus status = mqttManager.getStatus();
+
+            System.out.println();
+            if (status.isRunning()) {
+                parent.printInfo("MQTT 订阅状态: " + parent.green("运行中"));
+                System.out.println("  • 主题: " + parent.cyan(status.getTopic()));
+                System.out.println("  • 消息数: " + parent.cyan(String.valueOf(status.getMessageCount())));
+                System.out.println("  • 运行时长: " + parent.cyan(status.getDurationSeconds() + " 秒"));
+            } else {
+                parent.printInfo("MQTT 订阅状态: " + parent.dim("未运行"));
+                parent.printInfo("使用 'mqtt start' 启动订阅");
+            }
+            System.out.println();
+        }
+
+        /**
+         * 构建订阅主题
+         */
+        private String buildTopic(String customerId, String topicType) {
+            String baseTopic = "inteagle/" + customerId;
+
+            return switch (topicType.toLowerCase()) {
+                case "telemetry", "ts", "t" -> baseTopic + "/d/+/telemetry";
+                case "alarm", "alarms", "a" -> baseTopic + "/d/+/alarm";
+                case "event", "events", "e" -> baseTopic + "/d/+/event";
+                case "image", "images", "img" -> baseTopic + "/d/+/image";
+                case "device", "d" -> baseTopic + "/d/#";
+                case "project", "p" -> baseTopic + "/p/#";
+                case "", "all" -> baseTopic + "/#";
+                default -> {
+                    // 自定义主题
+                    if (topicType.startsWith("inteagle/")) {
+                        yield topicType;
+                    } else {
+                        yield baseTopic + "/" + topicType;
+                    }
+                }
+            };
         }
     }
 }

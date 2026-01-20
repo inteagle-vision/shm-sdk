@@ -44,4 +44,8 @@ surefire-reports/
 credentials.properties
 secrets.properties
 
+# Build artifacts
+bin/*.jar
+!bin/.gitkeep
+
 
