@@ -8,8 +8,6 @@ import com.inteagle.sdk.model.AlarmRule;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.AlarmRuleQuery;
 
-import java.util.List;
-
 /**
  * 告警规则 API 接口
  * <p>
@@ -23,11 +21,6 @@ import java.util.List;
  *         .projectId("project-001")
  *         .pageSize(20)
  *         .build()
- * );
- *
- * // 查询某设备的告警规则
- * List<AlarmRule> rules = client.alarmRules().listAll(
- *     AlarmRuleQuery.ofEntity("project-001", "DEVICE", "device-001")
  * );
  *
  * // 获取单个告警规则
@@ -44,15 +37,6 @@ public interface AlarmRuleApi {
      * @throws SdkException 如果查询失败
      */
     PageResult<AlarmRule> list(AlarmRuleQuery query) throws SdkException;
-
-    /**
-     * 查询所有告警规则 (不分页)
-     *
-     * @param query 查询条件
-     * @return 告警规则列表
-     * @throws SdkException 如果查询失败
-     */
-    List<AlarmRule> listAll(AlarmRuleQuery query) throws SdkException;
 
     /**
      * 获取单个告警规则

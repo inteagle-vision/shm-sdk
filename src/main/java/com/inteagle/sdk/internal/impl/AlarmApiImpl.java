@@ -12,7 +12,6 @@ import com.inteagle.sdk.model.AlarmStatistics;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.AlarmQuery;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,32 +61,6 @@ public class AlarmApiImpl implements AlarmApi {
     }
 
     @Override
-    public List<Alarm> listAll(AlarmQuery query) throws SdkException {
-        List<Alarm> all = new ArrayList<>();
-        int page = 0;
-        boolean hasMore = true;
-
-        while (hasMore) {
-            AlarmQuery pageQuery = AlarmQuery.builder()
-                    .projectId(query.getProjectId())
-                    .deviceId(query.getDeviceId())
-                    .severity(query.getSeverity())
-                    .type(query.getType())
-                    .active(query.getActive())
-                    .acknowledged(query.getAcknowledged())
-                    .page(page, query.getPageSize())
-                    .build();
-
-            PageResult<Alarm> result = list(pageQuery);
-            all.addAll(result.getData());
-            hasMore = result.hasMore();
-            page++;
-        }
-
-        return all;
-    }
-
-    @Override
     public Alarm get(String alarmId) throws SdkException {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("alarmId", alarmId);
@@ -113,16 +86,6 @@ public class AlarmApiImpl implements AlarmApi {
         }
 
         return response.data;
-    }
-
-    @Override
-    public List<Alarm> getActiveUnacknowledged() throws SdkException {
-        return listAll(AlarmQuery.activeUnacknowledged());
-    }
-
-    @Override
-    public List<Alarm> getByDevice(String deviceId) throws SdkException {
-        return listAll(AlarmQuery.ofDevice(deviceId));
     }
 
     /**

@@ -11,7 +11,6 @@ import com.inteagle.sdk.model.AlarmRule;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.AlarmRuleQuery;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,30 +54,6 @@ public class AlarmRuleApiImpl implements AlarmRuleApi {
                 data.getPage(),
                 data.getPageSize()
         );
-    }
-
-    @Override
-    public List<AlarmRule> listAll(AlarmRuleQuery query) throws SdkException {
-        List<AlarmRule> all = new ArrayList<>();
-        int page = 0;
-        boolean hasMore = true;
-
-        while (hasMore) {
-            AlarmRuleQuery pageQuery = AlarmRuleQuery.builder()
-                    .projectId(query.getProjectId())
-                    .entityType(query.getEntityType())
-                    .entityId(query.getEntityId())
-                    .enabled(query.getEnabled())
-                    .page(page, query.getPageSize())
-                    .build();
-
-            PageResult<AlarmRule> result = list(pageQuery);
-            all.addAll(result.getData());
-            hasMore = result.hasMore();
-            page++;
-        }
-
-        return all;
     }
 
     @Override

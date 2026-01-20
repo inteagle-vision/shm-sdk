@@ -9,8 +9,6 @@ import com.inteagle.sdk.model.AlarmStatistics;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.AlarmQuery;
 
-import java.util.List;
-
 /**
  * 告警 API 接口
  * <p>
@@ -43,15 +41,6 @@ public interface AlarmApi {
     PageResult<Alarm> list(AlarmQuery query) throws SdkException;
 
     /**
-     * 查询所有告警 (不分页)
-     *
-     * @param query 查询条件
-     * @return 告警列表
-     * @throws SdkException 如果查询失败
-     */
-    List<Alarm> listAll(AlarmQuery query) throws SdkException;
-
-    /**
      * 获取单个告警
      *
      * @param alarmId 告警 ID
@@ -68,21 +57,4 @@ public interface AlarmApi {
      * @throws SdkException 如果查询失败
      */
     AlarmStatistics getStatistics() throws SdkException;
-
-    /**
-     * 获取活跃未确认的告警
-     *
-     * @return 告警列表
-     * @throws SdkException 如果查询失败
-     */
-    List<Alarm> getActiveUnacknowledged() throws SdkException;
-
-    /**
-     * 获取设备的告警
-     *
-     * @param deviceId 设备 ID
-     * @return 告警列表
-     * @throws SdkException 如果查询失败
-     */
-    List<Alarm> getByDevice(String deviceId) throws SdkException;
 }

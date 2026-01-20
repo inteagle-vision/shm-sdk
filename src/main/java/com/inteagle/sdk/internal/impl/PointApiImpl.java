@@ -11,7 +11,6 @@ import com.inteagle.sdk.model.MonitoringPoint;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.PointQuery;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,31 +57,6 @@ public class PointApiImpl implements PointApi {
                 data.getPage(),
                 data.getPageSize()
         );
-    }
-
-    @Override
-    public List<MonitoringPoint> listAll(PointQuery query) throws SdkException {
-        List<MonitoringPoint> all = new ArrayList<>();
-        int page = 0;
-        boolean hasMore = true;
-
-        while (hasMore) {
-            PointQuery pageQuery = PointQuery.builder()
-                    .projectId(query.getProjectId())
-                    .name(query.getName())
-                    .type(query.getType())
-                    .deviceId(query.getDeviceId())
-                    .active(query.getActive())
-                    .page(page, query.getPageSize())
-                    .build();
-
-            PageResult<MonitoringPoint> result = list(pageQuery);
-            all.addAll(result.getData());
-            hasMore = result.hasMore();
-            page++;
-        }
-
-        return all;
     }
 
     @Override

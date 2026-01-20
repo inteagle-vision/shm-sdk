@@ -8,8 +8,6 @@ import com.inteagle.sdk.model.MonitoringProject;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.ProjectQuery;
 
-import java.util.List;
-
 /**
  * 项目 API 接口
  * <p>
@@ -38,15 +36,6 @@ public interface ProjectApi {
      * @throws SdkException 如果查询失败
      */
     PageResult<MonitoringProject> list(ProjectQuery query) throws SdkException;
-
-    /**
-     * 查询所有项目 (不分页)
-     *
-     * @param query 查询条件
-     * @return 项目列表
-     * @throws SdkException 如果查询失败
-     */
-    List<MonitoringProject> listAll(ProjectQuery query) throws SdkException;
 
     /**
      * 获取单个项目

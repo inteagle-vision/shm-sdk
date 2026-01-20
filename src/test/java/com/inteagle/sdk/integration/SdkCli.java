@@ -482,12 +482,13 @@ public class SdkCli implements Runnable {
 
         @Override
         public void run() {
-            list(null, 20);
+            list(null, null, 20);
         }
 
         @Command(name = "list", aliases = {"ls"}, description = "列出监测点")
         void list(
                 @Option(names = {"-p", "--project"}, description = "项目ID") String projectId,
+                @Option(names = {"-d", "--device"}, description = "设备ID") String deviceId,
                 @Option(names = {"-l", "--limit"}, description = "数量限制", defaultValue = "20") int limit
         ) {
             parent.printHeader("监测点列表");
@@ -495,6 +496,7 @@ public class SdkCli implements Runnable {
             try (InteagleClient client = parent.createClient()) {
                 PointQuery query = PointQuery.builder().pageSize(limit);
                 if (projectId != null) query.projectId(projectId);
+                if (deviceId != null) query.deviceId(deviceId);
 
                 PageResult<MonitoringPoint> result = client.points().list(query.build());
                 parent.printInfo("共 " + result.getTotal() + " 个监测点");
@@ -667,20 +669,24 @@ public class SdkCli implements Runnable {
         }
 
         @Command(name = "active", description = "查看活跃告警")
-        void active() {
+        void active(
+                @Option(names = {"-l", "--limit"}, description = "数量限制", defaultValue = "20") int limit
+        ) {
             parent.printHeader("活跃未确认告警");
 
             try (InteagleClient client = parent.createClient()) {
-                List<Alarm> alarms = client.alarms().getActiveUnacknowledged();
+                PageResult<Alarm> result = client.alarms().list(
+                        AlarmQuery.activeUnacknowledged().pageSize(limit).build()
+                );
 
-                if (alarms.isEmpty()) {
+                if (result.isEmpty()) {
                     parent.printSuccess("暂无活跃告警");
                     return;
                 }
 
-                parent.printInfo("共 " + alarms.size() + " 条");
+                parent.printInfo("共 " + result.getTotal() + " 条 (显示 " + result.getData().size() + " 条)");
 
-                for (Alarm a : alarms) {
+                for (Alarm a : result) {
                     String time = TIME_FMT.format(Instant.ofEpochMilli(a.getStartTs()));
                     String severity = formatSeverity(a.getSeverity(), parent);
 
@@ -987,13 +993,15 @@ public class SdkCli implements Runnable {
         }
 
         private void showAlarms(InteagleClient client) throws SdkException {
-            List<Alarm> alarms = client.alarms().getActiveUnacknowledged();
-            if (alarms.isEmpty()) {
+            PageResult<Alarm> result = client.alarms().list(
+                    AlarmQuery.activeUnacknowledged().pageSize(20).build()
+            );
+            if (result.isEmpty()) {
                 parent.printSuccess("暂无活跃告警");
                 return;
             }
-            parent.printInfo("共 " + alarms.size() + " 条活跃告警");
-            for (Alarm a : alarms) {
+            parent.printInfo("共 " + result.getTotal() + " 条活跃告警");
+            for (Alarm a : result) {
                 String time = TIME_FMT.format(Instant.ofEpochMilli(a.getStartTs()));
                 System.out.printf("  %s [%s] %s | %s%n",
                         parent.yellow("⚠"),

@@ -423,15 +423,17 @@ public class SdkTestCli {
 
     private void listActiveAlarms() throws SdkException {
         println("\n🔔 活跃未确认告警:");
-        List<Alarm> alarms = client.alarms().getActiveUnacknowledged();
+        PageResult<Alarm> result = client.alarms().list(
+                AlarmQuery.activeUnacknowledged().pageSize(20).build()
+        );
 
-        if (alarms.isEmpty()) {
+        if (result.isEmpty()) {
             println("   ✅ 暂无活跃告警");
             return;
         }
 
-        println("   共 " + alarms.size() + " 条\n");
-        for (Alarm a : alarms) {
+        println("   共 " + result.getTotal() + " 条\n");
+        for (Alarm a : result) {
             String time = TIME_FMT.format(Instant.ofEpochMilli(a.getStartTs()));
             println(String.format("   • [%s] %s | %s | %s",
                     a.getSeverity(), a.getType(), a.getOriginatorName(), time));

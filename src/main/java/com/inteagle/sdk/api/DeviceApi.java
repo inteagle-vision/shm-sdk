@@ -8,8 +8,6 @@ import com.inteagle.sdk.model.Device;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.DeviceQuery;
 
-import java.util.List;
-
 /**
  * 设备 API 接口
  * <p>
@@ -40,17 +38,6 @@ public interface DeviceApi {
      * @throws SdkException 如果查询失败
      */
     PageResult<Device> list(DeviceQuery query) throws SdkException;
-
-    /**
-     * 查询所有设备 (不分页)
-     * <p>
-     * 注意: 仅适合少量数据场景
-     *
-     * @param query 查询条件
-     * @return 设备列表
-     * @throws SdkException 如果查询失败
-     */
-    List<Device> listAll(DeviceQuery query) throws SdkException;
 
     /**
      * 获取单个设备

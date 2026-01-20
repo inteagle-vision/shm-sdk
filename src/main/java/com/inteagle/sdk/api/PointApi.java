@@ -8,8 +8,6 @@ import com.inteagle.sdk.model.MonitoringPoint;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.PointQuery;
 
-import java.util.List;
-
 /**
  * 监测点 API 接口
  * <p>
@@ -39,15 +37,6 @@ public interface PointApi {
      * @throws SdkException 如果查询失败
      */
     PageResult<MonitoringPoint> list(PointQuery query) throws SdkException;
-
-    /**
-     * 查询所有监测点 (不分页)
-     *
-     * @param query 查询条件
-     * @return 监测点列表
-     * @throws SdkException 如果查询失败
-     */
-    List<MonitoringPoint> listAll(PointQuery query) throws SdkException;
 
     /**
      * 获取单个监测点

@@ -12,7 +12,6 @@ import com.inteagle.sdk.model.MonitoringProject;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.ProjectQuery;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,30 +57,6 @@ public class ProjectApiImpl implements ProjectApi {
                 page,
                 query.getPageSize()
         );
-    }
-
-    @Override
-    public List<MonitoringProject> listAll(ProjectQuery query) throws SdkException {
-        List<MonitoringProject> all = new ArrayList<>();
-        int page = 0;
-        boolean hasMore = true;
-
-        while (hasMore) {
-            ProjectQuery pageQuery = ProjectQuery.builder()
-                    .name(query.getName())
-                    .type(query.getType())
-                    .active(query.getActive())
-                    .region(query.getRegion())
-                    .page(page, query.getPageSize())
-                    .build();
-
-            PageResult<MonitoringProject> result = list(pageQuery);
-            all.addAll(result.getData());
-            hasMore = result.hasMore();
-            page++;
-        }
-
-        return all;
     }
 
     @Override

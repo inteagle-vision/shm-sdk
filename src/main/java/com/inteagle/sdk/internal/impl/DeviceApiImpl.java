@@ -11,7 +11,6 @@ import com.inteagle.sdk.model.Device;
 import com.inteagle.sdk.model.PageResult;
 import com.inteagle.sdk.query.DeviceQuery;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,31 +58,6 @@ public class DeviceApiImpl implements DeviceApi {
                 data.page != null ? data.page : 0,
                 data.limit != null ? data.limit : query.getPageSize()
         );
-    }
-
-    @Override
-    public List<Device> listAll(DeviceQuery query) throws SdkException {
-        List<Device> all = new ArrayList<>();
-        int page = 0;
-        boolean hasMore = true;
-
-        while (hasMore) {
-            DeviceQuery pageQuery = DeviceQuery.builder()
-                    .projectId(query.getProjectId())
-                    .name(query.getName())
-                    .type(query.getType())
-                    .active(query.getActive())
-                    .label(query.getLabel())
-                    .page(page, query.getPageSize())
-                    .build();
-
-            PageResult<Device> result = list(pageQuery);
-            all.addAll(result.getData());
-            hasMore = result.hasMore();
-            page++;
-        }
-
-        return all;
     }
 
     @Override
