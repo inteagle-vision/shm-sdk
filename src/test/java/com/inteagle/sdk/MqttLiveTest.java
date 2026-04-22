@@ -13,7 +13,7 @@ import com.inteagle.sdk.mqtt.MqttSubscriber;
  * export INTEAGLE_SECRET_KEY=sk_sdk_test_full_secret_key_2024
  * export API_ENDPOINT=https://api.shm.inteagle.com
  * export MQTT_BROKER=broker.shm.inteagle.com
- * export MQTT_PORT=1883
+ * export MQTT_PORT=21883
  * mvn exec:java -Dexec.mainClass="com.inteagle.sdk.MqttLiveTest" -Dexec.classpathScope=test
  */
 public class MqttLiveTest {
@@ -25,7 +25,7 @@ public class MqttLiveTest {
 
         // MQTT Broker 配置 (用户填写)
         String mqttBroker = System.getenv().getOrDefault("MQTT_BROKER", "broker.shm.inteagle.com");
-        int mqttPort = Integer.parseInt(System.getenv().getOrDefault("MQTT_PORT", "1883"));
+        int mqttPort = Integer.parseInt(System.getenv().getOrDefault("MQTT_PORT", "21883"));
         boolean mqttUseTls = Boolean.parseBoolean(System.getenv().getOrDefault("MQTT_USE_TLS", "false"));
 
         System.out.println("=== MQTT Live Test ===");

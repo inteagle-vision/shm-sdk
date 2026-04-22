@@ -255,7 +255,7 @@ public final class InteagleClient implements Closeable {
      * InteagleClient client = InteagleClient.builder()
      *     .endpoint("https://api.shm.inteagle.com")
      *     .credentials("ak_xxx", "sk_xxx")
-     *     .mqtt("broker.shm.inteagle.com", 1883)  // 用户配置 broker 地址
+     *     .mqtt("broker.shm.inteagle.com", 21883)  // 用户配置 broker 地址
      *     .mqttUseTls(false)
      *     .build();
      *

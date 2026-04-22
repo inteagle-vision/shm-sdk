@@ -129,7 +129,7 @@ public class SdkCli implements Runnable {
         if (env != null && !env.isBlank()) {
             try { return Integer.parseInt(env); } catch (NumberFormatException ignored) {}
         }
-        return mqttUseTls ? 8883 : 1883;
+        return mqttUseTls ? 8883 : 21883;
     }
 
     boolean validateCredentials() {
