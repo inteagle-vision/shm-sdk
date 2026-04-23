@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.inteagle.sdk.InteagleClient;
 import com.inteagle.sdk.exception.SdkException;
+import com.inteagle.sdk.internal.transport.http.HmacAuthenticator;
 import com.inteagle.sdk.model.*;
 import com.inteagle.sdk.model.attr.AttrTypes;
 import com.inteagle.sdk.model.attr.Target;
@@ -15,6 +16,9 @@ import com.inteagle.sdk.query.*;
 import picocli.CommandLine;
 import picocli.CommandLine.*;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -22,6 +26,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -62,6 +67,7 @@ import com.inteagle.sdk.mqtt.data.AlarmData;
         SdkCli.AlarmsCommand.class,
         SdkCli.AlarmRulesCommand.class,
         SdkCli.MqttCommand.class,
+        SdkCli.HttpCommand.class,
         SdkCli.InteractiveCommand.class,
         CommandLine.HelpCommand.class
     }
@@ -826,6 +832,131 @@ public class SdkCli implements Runnable {
             System.out.println("使用 " + parent.cyan("mqtt telemetry") + " 订阅遥测数据");
             System.out.println("使用 " + parent.cyan("mqtt alarm") + " 订阅告警数据");
             System.out.println("使用 " + parent.cyan("mqtt device <id>") + " 订阅指定设备");
+            System.out.println("使用 " + parent.cyan("mqtt sign") + " 生成 MQTTX 等客户端的用户名/密码");
+        }
+
+        @Command(name = "sign", description = "生成 MQTTX 等第三方客户端所需的 username/password 签名")
+        void sign(
+                @Option(names = {"--client-id"}, description = "MQTT Client ID (默认使用 Access Key)") String clientIdOpt,
+                @Option(names = {"--timestamp"}, description = "使用指定时间戳(毫秒), 默认当前时间") Long timestampOpt,
+                @Option(names = {"--show-topic"}, description = "查询 customerId 并输出 topic 前缀", defaultValue = "true") boolean showTopic,
+                @Option(names = {"--format"}, description = "输出格式: pretty|env|json", defaultValue = "pretty") String format
+        ) {
+            if (!parent.validateCredentials()) return;
+
+            String ak = parent.getAccessKey();
+            String sk = parent.getSecretKey();
+            String clientId = (clientIdOpt != null && !clientIdOpt.isBlank()) ? clientIdOpt : ak;
+            long timestamp = (timestampOpt != null) ? timestampOpt : System.currentTimeMillis();
+
+            String signature = hmacSha256Hex(sk, timestamp + ":" + clientId);
+            String password = timestamp + ":" + signature;
+
+            String host = parent.getMqttHost();
+            int port = parent.getMqttPort();
+            String scheme = parent.mqttUseTls ? "ssl" : "tcp";
+            String brokerUrl = scheme + "://" + host + ":" + port;
+
+            String customerId = null;
+            if (showTopic) {
+                try (InteagleClient client = parent.createClient()) {
+                    customerId = client.me().getCustomerId();
+                } catch (Exception e) {
+                    // 非致命，仅在 pretty 输出时提示
+                }
+            }
+
+            switch (format.toLowerCase()) {
+                case "env" -> printEnvFormat(brokerUrl, host, port, clientId, ak, password, customerId);
+                case "json" -> printJsonFormat(brokerUrl, host, port, clientId, ak, password, timestamp, customerId);
+                default -> printPrettyFormat(brokerUrl, host, port, clientId, ak, password, timestamp, customerId, showTopic);
+            }
+        }
+
+        private void printPrettyFormat(String brokerUrl, String host, int port, String clientId,
+                                       String username, String password, long timestamp,
+                                       String customerId, boolean showTopic) {
+            parent.printHeader("MQTT 签名凭证 (可直接填入 MQTTX / mosquitto_sub)");
+            parent.printItem("Broker URL", brokerUrl);
+            parent.printItem("Host", host);
+            parent.printItem("Port", String.valueOf(port));
+            parent.printItem("TLS", parent.mqttUseTls ? "是 (MQTTX 需开启 SSL/TLS)" : "否");
+            System.out.println();
+            parent.printItem("Client ID", parent.yellow(clientId));
+            parent.printItem("Username", parent.yellow(username));
+            parent.printItem("Password", parent.yellow(password));
+            System.out.println();
+            parent.printItem("签名时间戳", String.valueOf(timestamp) + "  (" +
+                    TIME_FMT.format(Instant.ofEpochMilli(timestamp)) + ")");
+            parent.printItem("签名算法", "hex(HMAC-SHA256(SK, \"{timestamp}:{clientId}\"))");
+
+            if (showTopic) {
+                System.out.println();
+                if (customerId != null) {
+                    parent.printItem("Customer ID", customerId);
+                    parent.printItem("订阅所有",  "inteagle/" + customerId + "/#");
+                    parent.printItem("订阅设备",  "inteagle/" + customerId + "/d/{deviceId}");
+                    parent.printItem("订阅项目",  "inteagle/" + customerId + "/p/{projectId}/#");
+                } else {
+                    parent.printWarning("未能查询 customerId (topic 前缀未知), 请检查网络或 --endpoint");
+                }
+            }
+
+            System.out.println();
+            parent.printWarning("Client ID 必须与此处一致, 否则 broker 签名校验失败");
+            parent.printWarning("Password 内含时间戳, 建议 60 秒内完成连接");
+        }
+
+        private void printEnvFormat(String brokerUrl, String host, int port, String clientId,
+                                    String username, String password, String customerId) {
+            System.out.println("MQTT_BROKER_URL=" + brokerUrl);
+            System.out.println("MQTT_HOST=" + host);
+            System.out.println("MQTT_PORT=" + port);
+            System.out.println("MQTT_CLIENT_ID=" + clientId);
+            System.out.println("MQTT_USERNAME=" + username);
+            System.out.println("MQTT_PASSWORD=" + password);
+            if (customerId != null) {
+                System.out.println("MQTT_CUSTOMER_ID=" + customerId);
+                System.out.println("MQTT_TOPIC_PREFIX=inteagle/" + customerId);
+            }
+        }
+
+        private void printJsonFormat(String brokerUrl, String host, int port, String clientId,
+                                     String username, String password, long timestamp,
+                                     String customerId) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\n");
+            sb.append("  \"brokerUrl\": \"").append(brokerUrl).append("\",\n");
+            sb.append("  \"host\": \"").append(host).append("\",\n");
+            sb.append("  \"port\": ").append(port).append(",\n");
+            sb.append("  \"tls\": ").append(parent.mqttUseTls).append(",\n");
+            sb.append("  \"clientId\": \"").append(clientId).append("\",\n");
+            sb.append("  \"username\": \"").append(username).append("\",\n");
+            sb.append("  \"password\": \"").append(password).append("\",\n");
+            sb.append("  \"timestamp\": ").append(timestamp);
+            if (customerId != null) {
+                sb.append(",\n  \"customerId\": \"").append(customerId).append("\"");
+                sb.append(",\n  \"topicPrefix\": \"inteagle/").append(customerId).append("\"");
+            }
+            sb.append("\n}");
+            System.out.println(sb);
+        }
+
+        private String hmacSha256Hex(String secret, String data) {
+            try {
+                Mac mac = Mac.getInstance("HmacSHA256");
+                mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+                byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+                StringBuilder hex = new StringBuilder(hash.length * 2);
+                for (byte b : hash) {
+                    String h = Integer.toHexString(0xff & b);
+                    if (h.length() == 1) hex.append('0');
+                    hex.append(h);
+                }
+                return hex.toString();
+            } catch (Exception e) {
+                throw new RuntimeException("HMAC-SHA256 计算失败", e);
+            }
         }
 
         @Command(name = "listen", aliases = {"l"}, description = "订阅所有数据")
@@ -1061,6 +1192,126 @@ public class SdkCli implements Runnable {
                 " | " + parent.bold(data.getAlarmType() != null ? data.getAlarmType() : "-") +
                 " | 来源: " + (data.getOriginatorId() != null ? data.getOriginatorId() : "-")
             );
+        }
+    }
+
+    // ==================== HTTP 签名命令 ====================
+
+    @Command(name = "http", aliases = {"h"},
+             description = "HTTP API 签名工具 (供 curl / Postman / Apifox 直接使用)",
+             subcommands = {CommandLine.HelpCommand.class})
+    static class HttpCommand implements Runnable {
+
+        @ParentCommand
+        SdkCli parent;
+
+        @Override
+        public void run() {
+            System.out.println("使用 " + parent.cyan("http sign --method=GET --path=/api/v1/xxx") + " 生成签名 headers");
+        }
+
+        @Command(name = "sign", description = "生成 HTTP 签名 headers / curl 命令")
+        void sign(
+                @Option(names = {"-m", "--method"}, description = "HTTP 方法 (GET/POST/...)", required = true) String method,
+                @Option(names = {"-p", "--path"}, description = "请求路径 (可含 query, 签名时自动剥离)", required = true) String path,
+                @Option(names = {"--endpoint-override"}, description = "覆盖 endpoint, 仅影响 curl 输出") String endpointOverride,
+                @Option(names = {"--timestamp"}, description = "使用指定时间戳(毫秒), 默认当前时间") Long timestampOpt,
+                @Option(names = {"--nonce"}, description = "使用指定 nonce, 默认随机 UUID") String nonceOpt,
+                @Option(names = {"--format"}, description = "输出格式: pretty|curl|env|json", defaultValue = "pretty") String format
+        ) {
+            if (!parent.validateCredentials()) return;
+
+            String ak = parent.getAccessKey();
+            String sk = parent.getSecretKey();
+            String normalizedMethod = method.toUpperCase();
+            int q = path.indexOf('?');
+            String signPath = q >= 0 ? path.substring(0, q) : path;
+            long timestamp = timestampOpt != null ? timestampOpt : System.currentTimeMillis();
+            String nonce = (nonceOpt != null && !nonceOpt.isBlank())
+                    ? nonceOpt
+                    : UUID.randomUUID().toString().replace("-", "");
+
+            HmacAuthenticator auth = new HmacAuthenticator(ak, sk);
+            String signature = auth.sign(timestamp, nonce, normalizedMethod, signPath);
+
+            String endpoint = (endpointOverride != null && !endpointOverride.isBlank())
+                    ? endpointOverride
+                    : parent.getEndpoint();
+            if (endpoint.endsWith("/")) endpoint = endpoint.substring(0, endpoint.length() - 1);
+            String fullUrl = endpoint + path;
+
+            switch (format.toLowerCase()) {
+                case "curl" -> printHttpCurl(fullUrl, normalizedMethod, ak, timestamp, nonce, signature);
+                case "env" -> printHttpEnv(ak, timestamp, nonce, signature, normalizedMethod);
+                case "json" -> printHttpJson(fullUrl, normalizedMethod, signPath, path, ak, timestamp, nonce, signature);
+                default -> printHttpPretty(fullUrl, normalizedMethod, signPath, path, ak, timestamp, nonce, signature);
+            }
+        }
+
+        private void printHttpPretty(String fullUrl, String method, String signPath, String rawPath,
+                                     String ak, long timestamp, String nonce, String signature) {
+            String signString = method + ":" + signPath + ":" + timestamp + ":" + nonce;
+            parent.printHeader("HTTP 签名 headers (粘到 curl / Postman / Apifox 即可)");
+            parent.printItem("Method", method);
+            parent.printItem("Request Path", rawPath);
+            if (!rawPath.equals(signPath)) {
+                parent.printItem("Signed Path", signPath + "  (query 不参与签名)");
+            }
+            parent.printItem("Full URL", fullUrl);
+            System.out.println();
+            parent.printItem("X-Access-Key",  parent.yellow(ak));
+            parent.printItem("X-Timestamp",   parent.yellow(String.valueOf(timestamp)));
+            parent.printItem("X-Nonce",       parent.yellow(nonce));
+            parent.printItem("X-Signature",   parent.yellow(signature));
+            parent.printItem("X-HTTP-Method", parent.yellow(method));
+            System.out.println();
+            parent.printItem("签名材料", signString);
+            parent.printItem("签名算法", "hex(HMAC-SHA256(SK, \"method:path:timestamp:nonce\"))");
+            System.out.println();
+            parent.printWarning("POST body 不参与签名，可随意变更");
+            parent.printWarning("时间戳建议在服务端允许窗口内使用 (通常 5 分钟)");
+        }
+
+        private void printHttpCurl(String fullUrl, String method, String ak,
+                                   long timestamp, String nonce, String signature) {
+            System.out.println("curl -X " + method + " \\");
+            System.out.println("  -H 'X-Access-Key: " + ak + "' \\");
+            System.out.println("  -H 'X-Timestamp: " + timestamp + "' \\");
+            System.out.println("  -H 'X-Nonce: " + nonce + "' \\");
+            System.out.println("  -H 'X-Signature: " + signature + "' \\");
+            System.out.println("  -H 'X-HTTP-Method: " + method + "' \\");
+            System.out.println("  -H 'Content-Type: application/json' \\");
+            System.out.println("  '" + fullUrl + "'");
+        }
+
+        private void printHttpEnv(String ak, long timestamp, String nonce, String signature, String method) {
+            System.out.println("X_ACCESS_KEY=" + ak);
+            System.out.println("X_TIMESTAMP=" + timestamp);
+            System.out.println("X_NONCE=" + nonce);
+            System.out.println("X_SIGNATURE=" + signature);
+            System.out.println("X_HTTP_METHOD=" + method);
+        }
+
+        private void printHttpJson(String fullUrl, String method, String signPath, String rawPath,
+                                   String ak, long timestamp, String nonce, String signature) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\n");
+            sb.append("  \"method\": \"").append(method).append("\",\n");
+            sb.append("  \"path\": \"").append(rawPath).append("\",\n");
+            sb.append("  \"signedPath\": \"").append(signPath).append("\",\n");
+            sb.append("  \"url\": \"").append(fullUrl).append("\",\n");
+            sb.append("  \"timestamp\": ").append(timestamp).append(",\n");
+            sb.append("  \"nonce\": \"").append(nonce).append("\",\n");
+            sb.append("  \"signature\": \"").append(signature).append("\",\n");
+            sb.append("  \"headers\": {\n");
+            sb.append("    \"X-Access-Key\": \"").append(ak).append("\",\n");
+            sb.append("    \"X-Timestamp\": \"").append(timestamp).append("\",\n");
+            sb.append("    \"X-Nonce\": \"").append(nonce).append("\",\n");
+            sb.append("    \"X-Signature\": \"").append(signature).append("\",\n");
+            sb.append("    \"X-HTTP-Method\": \"").append(method).append("\"\n");
+            sb.append("  }\n");
+            sb.append("}");
+            System.out.println(sb);
         }
     }
 
