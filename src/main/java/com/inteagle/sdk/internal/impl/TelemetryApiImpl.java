@@ -190,53 +190,54 @@ public class TelemetryApiImpl implements TelemetryApi {
 
         long ts = node.has("ts") ? node.get("ts").asLong() : 0;
 
-        TelemetryValue.TelemetryValueBuilder builder = TelemetryValue.builder().ts(ts);
+        TelemetryValue telemetryValue = new TelemetryValue();
+        telemetryValue.setTs(ts);
 
         if (node.has("value")) {
             JsonNode valueNode = node.get("value");
-            parseValue(builder, valueNode);
+            parseValue(telemetryValue, valueNode);
         }
 
         // 支持直接的类型字段
         if (node.has("boolV") && !node.get("boolV").isNull()) {
-            builder.boolValue(node.get("boolV").asBoolean());
+            telemetryValue.setBoolValue(node.get("boolV").asBoolean());
         }
         if (node.has("strV") && !node.get("strV").isNull()) {
-            builder.strValue(node.get("strV").asText());
+            telemetryValue.setStrValue(node.get("strV").asText());
         }
         if (node.has("longV") && !node.get("longV").isNull()) {
-            builder.longValue(node.get("longV").asLong());
+            telemetryValue.setLongValue(node.get("longV").asLong());
         }
         if (node.has("dblV") && !node.get("dblV").isNull()) {
-            builder.dblValue(node.get("dblV").asDouble());
+            telemetryValue.setDblValue(node.get("dblV").asDouble());
         }
         if (node.has("jsonV") && !node.get("jsonV").isNull()) {
-            builder.jsonValue(node.get("jsonV").asText());
+            telemetryValue.setJsonValue(node.get("jsonV").asText());
         }
 
-        return builder.build();
+        return telemetryValue;
     }
 
     /**
      * 解析值字段
      */
-    private void parseValue(TelemetryValue.TelemetryValueBuilder builder, JsonNode valueNode) {
+    private void parseValue(TelemetryValue telemetryValue, JsonNode valueNode) {
         if (valueNode.isBoolean()) {
-            builder.boolValue(valueNode.asBoolean());
-            builder.value(valueNode.asBoolean());
+            telemetryValue.setBoolValue(valueNode.asBoolean());
+            telemetryValue.setValue(valueNode.asBoolean());
         } else if (valueNode.isLong() || valueNode.isInt()) {
-            builder.longValue(valueNode.asLong());
-            builder.value(valueNode.asLong());
+            telemetryValue.setLongValue(valueNode.asLong());
+            telemetryValue.setValue(valueNode.asLong());
         } else if (valueNode.isDouble() || valueNode.isFloat()) {
-            builder.dblValue(valueNode.asDouble());
-            builder.value(valueNode.asDouble());
+            telemetryValue.setDblValue(valueNode.asDouble());
+            telemetryValue.setValue(valueNode.asDouble());
         } else if (valueNode.isTextual()) {
-            builder.strValue(valueNode.asText());
-            builder.value(valueNode.asText());
+            telemetryValue.setStrValue(valueNode.asText());
+            telemetryValue.setValue(valueNode.asText());
         } else if (valueNode.isObject() || valueNode.isArray()) {
             String json = valueNode.toString();
-            builder.jsonValue(json);
-            builder.value(json);
+            telemetryValue.setJsonValue(json);
+            telemetryValue.setValue(json);
         }
     }
 

@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -65,7 +66,7 @@ public class MqttSubscriber implements AutoCloseable {
     private final String customerId;      // 用于 Topic 前缀
     private final boolean useTls;
 
-    private MqttClient mqttClient;
+    private volatile MqttClient mqttClient;
     private final Map<String, Consumer<BridgeMessage>> subscriptions = new ConcurrentHashMap<>();
     private final ExecutorService asyncExecutor = Executors.newCachedThreadPool();
 
@@ -74,6 +75,9 @@ public class MqttSubscriber implements AutoCloseable {
 
     // 重连计数器
     private final AtomicInteger reconnectCount = new AtomicInteger(0);
+    private final AtomicBoolean reconnecting = new AtomicBoolean(false);
+    private volatile boolean intentionalDisconnect = false;
+    private volatile boolean closed = false;
 
     // 连接状态监听器
     private Consumer<ConnectionEvent> connectionEventListener;
@@ -122,69 +126,65 @@ public class MqttSubscriber implements AutoCloseable {
      * @throws MqttException if connection fails
      */
     public void connect() throws MqttException {
-        String protocol = useTls ? "ssl" : "tcp";
-        String brokerUrl = String.format("%s://%s:%d", protocol, host, port);
+        prepareForConnect();
+        connectOnce(false);
+    }
+
+    /**
+     * Connect to MQTT broker and keep retrying until connected.
+     * <p>Use this in long-running applications where the broker or network may
+     * be unavailable during process startup. Each attempt creates a fresh MQTT
+     * HMAC password, so expired signatures are not reused.
+     *
+     * @throws MqttException if the thread is interrupted while waiting to retry
+     */
+    public void connectWithRetry() throws MqttException {
+        prepareForConnect();
+
+        while (!closed && !intentionalDisconnect) {
+            try {
+                connectOnce(false);
+                return;
+            } catch (MqttException e) {
+                closeDisconnectedClient();
+                log.warn("Initial MQTT connect failed, retrying in {} ms: {}",
+                        DEFAULT_RECONNECT_DELAY_MS, e.getMessage());
+                sleepBeforeRetry();
+            }
+        }
+    }
+
+    private void prepareForConnect() {
+        closed = false;
+        intentionalDisconnect = false;
+    }
+
+    private void connectOnce(boolean reconnect) throws MqttException {
+        String brokerUrl = brokerUrl();
         String clientId = accessKeyId;
 
         log.info("Connecting to {} as {}", brokerUrl, clientId);
 
-        mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
-
-        // HMAC 签名认证 (SK 不会明文传输)
-        long timestamp = System.currentTimeMillis();
-        String signString = timestamp + ":" + clientId;
-        String signature = hmacSha256(accessKeySecret, signString);
-        String password = timestamp + ":" + signature;
-
-        MqttConnectOptions options = new MqttConnectOptions();
-        options.setUserName(accessKeyId);
-        options.setPassword(password.toCharArray());
-        options.setConnectionTimeout(CONNECTION_TIMEOUT);
-        options.setKeepAliveInterval(KEEP_ALIVE_INTERVAL);
-        options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
-
-        if (useTls) {
-            options.setSocketFactory(getDefaultSSLSocketFactory());
+        if (mqttClient != null && mqttClient.isConnected()) {
+            log.info("Already connected to {}", brokerUrl);
+            return;
         }
 
-        // 使用 MqttCallbackExtended 支持重连后自动重新订阅
-        mqttClient.setCallback(new MqttCallbackExtended() {
-            @Override
-            public void connectComplete(boolean reconnect, String serverURI) {
-                if (reconnect) {
-                    int count = reconnectCount.incrementAndGet();
-                    log.info("Reconnected to {} (count: {}), re-subscribing {} topics...",
-                            serverURI, count, subscriptions.size());
+        closeDisconnectedClient();
+        mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
+        mqttClient.setCallback(createCallback());
+        mqttClient.connect(createConnectOptions(clientId));
 
-                    // 重新订阅所有 topic
-                    resubscribeAll();
-
-                    // 通知监听器
-                    notifyConnectionEvent(ConnectionEvent.reconnected(serverURI, count));
-                } else {
-                    log.info("Connected to {}", serverURI);
-                    notifyConnectionEvent(ConnectionEvent.connected(serverURI));
-                }
-            }
-
-            @Override
-            public void connectionLost(Throwable cause) {
-                log.warn("Connection lost: {}", cause.getMessage());
-                notifyConnectionEvent(ConnectionEvent.disconnected(cause.getMessage()));
-            }
-
-            @Override
-            public void messageArrived(String topic, MqttMessage message) {
-                handleMessage(topic, message);
-            }
-
-            @Override
-            public void deliveryComplete(IMqttDeliveryToken token) {}
-        });
-
-        mqttClient.connect(options);
-        log.info("Connected successfully");
+        if (reconnect) {
+            int count = reconnectCount.incrementAndGet();
+            log.info("Reconnected to {} (count: {}), re-subscribing {} topics...",
+                    brokerUrl, count, subscriptions.size());
+            resubscribeAll();
+            notifyConnectionEvent(ConnectionEvent.reconnected(brokerUrl, count));
+        } else {
+            log.info("Connected successfully");
+            notifyConnectionEvent(ConnectionEvent.connected(brokerUrl));
+        }
     }
 
     /**
@@ -197,6 +197,21 @@ public class MqttSubscriber implements AutoCloseable {
         return CompletableFuture.runAsync(() -> {
             try {
                 connect();
+            } catch (MqttException e) {
+                throw new RuntimeException("Failed to connect", e);
+            }
+        }, asyncExecutor);
+    }
+
+    /**
+     * Connect to MQTT broker asynchronously and keep retrying until connected.
+     *
+     * @return CompletableFuture that completes when connection is established
+     */
+    public CompletableFuture<Void> connectWithRetryAsync() {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                connectWithRetry();
             } catch (MqttException e) {
                 throw new RuntimeException("Failed to connect", e);
             }
@@ -234,6 +249,7 @@ public class MqttSubscriber implements AutoCloseable {
      * @throws MqttException if disconnection fails
      */
     public void disconnect() throws MqttException {
+        intentionalDisconnect = true;
         if (mqttClient != null && mqttClient.isConnected()) {
             mqttClient.disconnect();
             log.info("Disconnected");
@@ -246,7 +262,15 @@ public class MqttSubscriber implements AutoCloseable {
      */
     @Override
     public void close() throws Exception {
-        disconnect();
+        closed = true;
+        intentionalDisconnect = true;
+        MqttException disconnectException = null;
+        try {
+            disconnect();
+        } catch (MqttException e) {
+            disconnectException = e;
+        }
+
         asyncExecutor.shutdown();
         try {
             if (!asyncExecutor.awaitTermination(EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -255,6 +279,10 @@ public class MqttSubscriber implements AutoCloseable {
         } catch (InterruptedException e) {
             asyncExecutor.shutdownNow();
             Thread.currentThread().interrupt();
+        }
+
+        if (disconnectException != null) {
+            throw disconnectException;
         }
     }
 
@@ -626,6 +654,124 @@ public class MqttSubscriber implements AutoCloseable {
     }
 
     // ==================== 重连与 QoS 配置 ====================
+
+    private String brokerUrl() {
+        String protocol = useTls ? "ssl" : "tcp";
+        return String.format("%s://%s:%d", protocol, host, port);
+    }
+
+    private void sleepBeforeRetry() throws MqttException {
+        try {
+            Thread.sleep(DEFAULT_RECONNECT_DELAY_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new MqttException(e);
+        }
+    }
+
+    private void closeDisconnectedClient() {
+        MqttClient client = mqttClient;
+        if (client == null || client.isConnected()) {
+            return;
+        }
+
+        try {
+            client.close();
+        } catch (MqttException e) {
+            log.debug("Failed to close disconnected MQTT client: {}", e.getMessage());
+        } finally {
+            if (mqttClient == client) {
+                mqttClient = null;
+            }
+        }
+    }
+
+    MqttConnectOptions createConnectOptions(String clientId) {
+        long timestamp = System.currentTimeMillis();
+        String signString = timestamp + ":" + clientId;
+        String signature = hmacSha256(accessKeySecret, signString);
+        String password = timestamp + ":" + signature;
+
+        MqttConnectOptions options = new MqttConnectOptions();
+        options.setUserName(accessKeyId);
+        options.setPassword(password.toCharArray());
+        options.setConnectionTimeout(CONNECTION_TIMEOUT);
+        options.setKeepAliveInterval(KEEP_ALIVE_INTERVAL);
+        options.setAutomaticReconnect(false);
+        options.setCleanSession(true);
+
+        if (useTls) {
+            options.setSocketFactory(getDefaultSSLSocketFactory());
+        }
+
+        return options;
+    }
+
+    private MqttCallbackExtended createCallback() {
+        return new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                log.debug("MQTT connect complete: reconnect={}, serverURI={}", reconnect, serverURI);
+            }
+
+            @Override
+            public void connectionLost(Throwable cause) {
+                String reason = cause != null ? cause.getMessage() : "unknown";
+                log.warn("Connection lost: {}", reason);
+                notifyConnectionEvent(ConnectionEvent.disconnected(reason));
+
+                if (!intentionalDisconnect && !closed) {
+                    startReconnectLoop();
+                }
+            }
+
+            @Override
+            public void messageArrived(String topic, MqttMessage message) {
+                handleMessage(topic, message);
+            }
+
+            @Override
+            public void deliveryComplete(IMqttDeliveryToken token) {}
+        };
+    }
+
+    private void startReconnectLoop() {
+        if (!reconnecting.compareAndSet(false, true)) {
+            return;
+        }
+
+        asyncExecutor.submit(() -> {
+            try {
+                while (!closed && !intentionalDisconnect) {
+                    try {
+                        Thread.sleep(DEFAULT_RECONNECT_DELAY_MS);
+                        if (closed || intentionalDisconnect) {
+                            return;
+                        }
+
+                        MqttClient client = mqttClient;
+                        if (client == null || client.isConnected()) {
+                            return;
+                        }
+
+                        log.info("Reconnecting to {} as {}", brokerUrl(), accessKeyId);
+                        connectOnce(true);
+                        return;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    } catch (MqttException | RuntimeException e) {
+                        log.warn("Reconnect failed: {}", e.getMessage());
+                    }
+                }
+            } finally {
+                reconnecting.set(false);
+                if (!closed && !intentionalDisconnect && mqttClient != null && !mqttClient.isConnected()) {
+                    startReconnectLoop();
+                }
+            }
+        });
+    }
 
     /**
      * 重新订阅所有已注册的 topic（重连后调用）

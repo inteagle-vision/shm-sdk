@@ -9,8 +9,8 @@ import com.inteagle.sdk.mqtt.MqttSubscriber;
  * 用户配置 MQTT broker 地址，SDK 自动获取 customerId。
  * <p>
  * 运行方式:
- * export INTEAGLE_ACCESS_KEY=ak_sdk_test_full
- * export INTEAGLE_SECRET_KEY=sk_sdk_test_full_secret_key_2024
+ * export INTEAGLE_ACCESS_KEY=ak_xxx
+ * export INTEAGLE_SECRET_KEY=sk_xxx
  * export API_ENDPOINT=https://api.shm.inteagle.com
  * export MQTT_BROKER=broker.shm.inteagle.com
  * export MQTT_PORT=21883
@@ -20,8 +20,8 @@ public class MqttLiveTest {
     public static void main(String[] args) throws Exception {
         // API 配置
         String endpoint = System.getenv().getOrDefault("API_ENDPOINT", "https://api.shm.inteagle.com");
-        String accessKey = System.getenv().getOrDefault("INTEAGLE_ACCESS_KEY", "ak_sdk_test_full");
-        String secretKey = System.getenv().getOrDefault("INTEAGLE_SECRET_KEY", "sk_sdk_test_full_secret_key_2024");
+        String accessKey = getenvRequired("INTEAGLE_ACCESS_KEY");
+        String secretKey = getenvRequired("INTEAGLE_SECRET_KEY");
 
         // MQTT Broker 配置 (用户填写)
         String mqttBroker = System.getenv().getOrDefault("MQTT_BROKER", "broker.shm.inteagle.com");
@@ -30,7 +30,7 @@ public class MqttLiveTest {
 
         System.out.println("=== MQTT Live Test ===");
         System.out.println("API Endpoint: " + endpoint);
-        System.out.println("AccessKey: " + accessKey);
+        System.out.println("AccessKey: " + mask(accessKey));
         System.out.println("MQTT Broker: " + mqttBroker + ":" + mqttPort + " (TLS=" + mqttUseTls + ")");
         System.out.println();
 
@@ -51,8 +51,8 @@ public class MqttLiveTest {
 
         // 使用自动发现创建 MQTT 订阅器 (broker 用户配置，customerId 自动获取)
         try (MqttSubscriber subscriber = client.createMqttSubscriber()) {
-            System.out.println("Connecting...");
-            subscriber.connect();
+            System.out.println("Connecting with retry...");
+            subscriber.connectWithRetry();
             System.out.println("Connected!");
 
             // 方式1: 订阅所有类型，使用类型过滤
@@ -105,5 +105,20 @@ public class MqttLiveTest {
 
         client.close();
         System.out.println("=== SUCCESS ===");
+    }
+
+    private static String getenvRequired(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Please set " + name);
+        }
+        return value;
+    }
+
+    private static String mask(String value) {
+        if (value.length() <= 8) {
+            return "****";
+        }
+        return value.substring(0, 4) + "..." + value.substring(value.length() - 4);
     }
 }
